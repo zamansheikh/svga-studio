@@ -35,8 +35,8 @@ export default function Inspector({ tab, onTab, panels, active, originalSize, re
   const hasResult = resultSize != null && !stale;
 
   return (
-    <aside className="glass rounded-2xl flex flex-col min-h-0" aria-label="Inspector">
-      <div className="flex gap-1 p-2 border-b border-white/5" role="tablist">
+    <aside className="flex min-h-0 flex-col border-t border-white/[0.07] bg-[#0c0f1c] lg:border-l lg:border-t-0" aria-label="Inspector">
+      <div className="flex h-11 shrink-0 items-center gap-1 border-b border-white/[0.06] px-2" role="tablist">
         {TABS.map((t) => (
           <button key={t.id} role="tab" aria-selected={tab === t.id} onClick={() => onTab(t.id)}
             className={`relative flex-1 rounded-lg px-3 py-2 text-xs font-medium transition ${tab === t.id ? "bg-white/10 text-white" : "text-white/60 hover:text-white hover:bg-white/5"}`}>
@@ -46,12 +46,12 @@ export default function Inspector({ tab, onTab, panels, active, originalSize, re
         ))}
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 max-h-[60vh] lg:max-h-[66vh]">
+      <div className="flex-1 overflow-y-auto p-4 lg:min-h-0">
         {panels[tab]}
       </div>
 
       {/* Footer: numbers + the one action */}
-      <div className="border-t border-white/5 p-4 space-y-3">
+      <div className="shrink-0 space-y-3 border-t border-white/[0.06] bg-[#0a0d19] p-3">
         <div className="grid grid-cols-3 gap-2 text-center">
           <Stat label="Original" value={originalSize != null ? formatBytes(originalSize) : "—"} />
           <Stat label="Result" value={hasResult ? formatBytes(resultSize!) : stale && resultSize != null ? "out of date" : "—"} strong={hasResult} />

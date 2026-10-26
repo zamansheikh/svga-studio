@@ -69,9 +69,16 @@ npx vercel
 
 ## Layout
 
-Three columns. **Files** on the left lists everything you dropped and marks
-which ones are siblings of the file being edited. The **Stage** in the middle
-plays the animation in three views — *Original*, *Edited* (your edits, live),
+`/` is the landing page: what the tools do, two cards to start from (drop files
+on a card to open that tool with them), features and FAQ.
+
+The tools are an app at **`/edit`** and **`/icons`**: a slim top bar (tool tabs,
+shortcuts, help) and the tool filling the window, with panels that scroll on
+their own. Both tools stay loaded while you switch, so neither loses its work.
+
+**Editor.** **Files** on the left lists everything you dropped and marks which
+ones are siblings of the file being edited. The **Stage** in the middle plays
+the animation in three views — *Original*, *Edited* (your edits, live),
 *Result* (what you will download); keys 1/2/3 switch, space plays, `,` and `.`
 step a frame. The **Inspector** on the right has four tabs — *Text*, *Layers*,
 *Compress*, *Watermark* — and a footer with before/after size and a single
@@ -117,8 +124,8 @@ can be dragged and resized; the text follows it.
 
 ## Batch icons
 
-Switch to **Batch icons** at the top (or open `/#icons`, or press *Make icons for
-all N* in the editor's file list). Drop `.svga` files or whole folders — folders
+Open **Batch icons** (`/icons`, the tab in the top bar, or *Make icons for all N*
+in the editor's file list). Drop `.svga` files or whole folders — folders
 are searched inside — and a still image of every animation appears in a grid.
 
 - **Frame**: *Best* picks the most detailed frame, scored the way the gift

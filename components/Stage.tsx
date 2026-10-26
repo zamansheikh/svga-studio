@@ -174,8 +174,8 @@ export default function Stage({ movies, view, onView, mode, watermark, onWaterma
   const hasAudio = !!movie?.audioBytes.length;
 
   return (
-    <section className="glass rounded-2xl overflow-hidden flex flex-col min-h-[420px]" aria-label="Preview">
-      <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-white/5">
+    <section className="flex min-h-0 flex-col bg-[#090b15]" aria-label="Preview">
+      <div className="flex h-11 shrink-0 items-center justify-between gap-2 border-b border-white/[0.06] px-3">
         <div className="flex gap-1 rounded-lg bg-white/5 p-1" role="tablist" aria-label="Preview view">
           {VIEWS.map((v, i) => {
             const available = v.id === "original" || (v.id === "edited" ? !!movies.edited : !!movies.result);
@@ -199,7 +199,7 @@ export default function Stage({ movies, view, onView, mode, watermark, onWaterma
         </div>
       </div>
 
-      <div ref={areaRef} className="relative flex-1 flex items-center justify-center p-4 checkerboard h-[min(62vh,640px)] min-h-[320px]">
+      <div ref={areaRef} className="checkerboard relative flex h-[52vh] min-h-[300px] items-center justify-center p-4 lg:h-auto lg:min-h-0 lg:flex-1">
         {err && <div className="text-center text-red-400 text-sm max-w-xs">{err}</div>}
         {!movie && !err && <div className="text-white/40 text-sm">Nothing to show yet</div>}
         <div className="relative max-w-full">
@@ -220,7 +220,7 @@ export default function Stage({ movies, view, onView, mode, watermark, onWaterma
       </div>
 
       {movie && (
-        <div className="flex items-center gap-2 px-4 py-3 border-t border-white/5">
+        <div className="flex shrink-0 items-center gap-2 border-t border-white/[0.06] px-3 py-2">
           <IconButton onClick={() => step(-1)} label="Previous frame (,)"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z" /></IconButton>
           <IconButton onClick={toggle} label={playing ? "Pause (space)" : "Play (space)"} strong>
             {playing ? <><rect x="6" y="5" width="4" height="14" rx="1" /><rect x="14" y="5" width="4" height="14" rx="1" /></> : <path d="M7 5v14l12-7z" />}

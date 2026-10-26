@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import JSZip from "jszip";
+import Link from "next/link";
 import Dropzone from "./Dropzone";
 import FilesPanel, { type LoadedFile } from "./FilesPanel";
 import Stage, { type StageView } from "./Stage";
@@ -65,6 +66,7 @@ export default function Workspace({ incoming = null, onMakeIcons, active = true 
   const [error, setError] = useState<string | null>(null);
 
   const [view, setView] = useState<StageView>("original");
+  const [hiddenNotes, setHiddenNotes] = useState<Set<string>>(new Set());
   const [tab, setTab] = useState<InspectorTab>("text");
   const [seek, setSeek] = useState<{ frame: number; nonce: number } | null>(null);
   const [highlight, setHighlight] = useState<{ transform: Transform; width: number; height: number } | null>(null);
@@ -416,24 +418,28 @@ export default function Workspace({ incoming = null, onMakeIcons, active = true 
 
   if (!original || !activeFile || !base) {
     return (
-      <div className="space-y-4">
-        <Dropzone onFiles={(f) => load(f, false)} />
-        {error && <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-200">{error}</div>}
+      <div className="grid h-full min-h-[calc(100dvh-3rem)] place-items-center p-4 sm:p-8 lg:min-h-0">
+        <div className="w-full max-w-2xl space-y-4">
+          <Dropzone onFiles={(f) => load(f, false)} />
+          {error && <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-200">{error}</div>}
+          <p className="text-center text-xs text-white/45">
+            Many files to turn into images? <Link href="/icons" className="text-brand-300 hover:text-brand-200">Make icons for all of them →</Link>
+          </p>
+        </div>
       </div>
     );
   }
 
   const stageMode = tab === "text" ? "text" : tab === "watermark" ? "watermark" : "none";
+  const sourceNote = original.source && (original.source.container === "zip" || original.source.note)
+    ? original.source.container === "zip" ? `This is an SVGA ${original.source.version} file. It opens here as usual and downloads as SVGA 2.x, which every current player reads.` : `Note: ${original.source.note}.`
+    : null;
   return (
-    <div className="space-y-3">
-      {error && <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">{error}</div>}
-      {original.source && (original.source.container === "zip" || original.source.note) && (
-        <div className="rounded-xl border border-sky-500/25 bg-sky-500/10 px-3 py-2 text-[12px] text-sky-100/90">
-          {original.source.container === "zip" ? <>This is an SVGA {original.source.version} file. It opens here as usual and downloads as SVGA 2.x, which every current player reads.</> : <>Note: {original.source.note}.</>}
-        </div>
-      )}
+    <div className="flex h-full flex-col">
+      {error && <Notice tone="error" onClose={() => setError(null)}>{error}</Notice>}
+      {sourceNote && !hiddenNotes.has(sourceNote) && <Notice tone="info" onClose={() => setHiddenNotes((h) => new Set(h).add(sourceNote))}>{sourceNote}</Notice>}
 
-      <div className="grid gap-3 lg:grid-cols-[220px_minmax(0,1fr)_380px] items-start">
+      <div className="grid flex-1 grid-cols-1 lg:min-h-0 lg:grid-cols-[232px_minmax(0,1fr)_384px]">
         <FilesPanel files={files} active={activeFile} siblingNames={siblingNames} onPick={(f) => pick(f, files)} onAdd={(f) => load(f, true)} onClear={clear} disabled={building}
           onMakeIcons={onMakeIcons ? () => onMakeIcons(files.map((f) => f.file)) : undefined} />
 
@@ -482,6 +488,16 @@ export default function Workspace({ incoming = null, onMakeIcons, active = true 
           downloadName={downloadName}
         />
       </div>
+    </div>
+  );
+}
+
+function Notice({ tone, onClose, children }: { tone: "error" | "info"; onClose: () => void; children: React.ReactNode }) {
+  const cls = tone === "error" ? "border-red-500/25 bg-red-500/10 text-red-100" : "border-sky-500/20 bg-sky-500/[0.08] text-sky-100/90";
+  return (
+    <div className={`flex shrink-0 items-start gap-3 border-b px-4 py-2 text-[12px] leading-relaxed ${cls}`} role={tone === "error" ? "alert" : "status"}>
+      <span className="flex-1">{children}</span>
+      <button type="button" onClick={onClose} aria-label="Dismiss" className="-my-0.5 rounded px-1.5 text-base leading-none opacity-60 hover:opacity-100">×</button>
     </div>
   );
 }

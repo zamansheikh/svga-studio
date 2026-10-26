@@ -24,8 +24,8 @@ type Props = {
 export default function FilesPanel({ files, active, siblingNames, onPick, onAdd, onClear, disabled, onMakeIcons }: Props) {
   const [over, setOver] = useState(false);
   return (
-    <aside className="glass rounded-2xl flex flex-col min-h-0" aria-label="Files">
-      <div className="flex items-center justify-between px-4 py-3 border-b border-white/5">
+    <aside className="flex min-h-0 flex-col border-b border-white/[0.07] bg-[#0c0f1c] lg:border-b-0 lg:border-r" aria-label="Files">
+      <div className="flex h-11 shrink-0 items-center justify-between border-b border-white/[0.06] px-3">
         <div className="text-sm font-medium text-white">
           Files <span className="text-white/40 font-normal">· {files.length}</span>
         </div>
@@ -34,7 +34,7 @@ export default function FilesPanel({ files, active, siblingNames, onPick, onAdd,
         </button>
       </div>
 
-      <ul className="flex-1 overflow-y-auto max-h-[40vh] lg:max-h-[60vh] p-2 space-y-1">
+      <ul className="max-h-[32vh] flex-1 space-y-1 overflow-y-auto p-2 lg:max-h-none">
         {files.map((f) => {
           const isActive = f.file === active;
           const isSibling = siblingNames.has(f.file.name);

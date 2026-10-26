@@ -204,8 +204,9 @@ export default function IconBatch({ incoming, onEdit, active }: Props) {
 
   if (!items.length) {
     return (
+      <div className="grid h-full min-h-[calc(100dvh-3rem)] place-items-center p-4 sm:p-8 lg:min-h-0">
       <div onDragOver={(e) => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)} onDrop={onDrop}
-        className={`rounded-3xl border-2 border-dashed glass p-8 sm:p-12 text-center transition ${over ? "border-brand-400 bg-brand-500/10" : "border-white/10"}`}>
+        className={`w-full max-w-2xl rounded-3xl border-2 border-dashed bg-white/[0.02] p-8 sm:p-12 text-center transition ${over ? "border-brand-400 bg-brand-500/10" : "border-white/10"}`}>
         {pickers}
         <div className="mx-auto h-14 w-14 rounded-2xl bg-gradient-to-br from-fuchsia-500 to-brand-500 grid place-items-center shadow-lg shadow-fuchsia-500/20">
           <svg viewBox="0 0 24 24" className="h-7 w-7 fill-white"><path d="M4 4h7v7H4V4zm9 0h7v7h-7V4zM4 13h7v7H4v-7zm9 0h7v7h-7v-7z" /></svg>
@@ -218,17 +219,18 @@ export default function IconBatch({ incoming, onEdit, active }: Props) {
         </div>
         <p className="mt-4 text-xs text-white/40">Folders are searched inside too, and the zip keeps the same folders.</p>
       </div>
+      </div>
     );
   }
 
   return (
-    <div className="grid gap-3 lg:grid-cols-[300px_minmax(0,1fr)] items-start" onDragOver={(e) => { e.preventDefault(); setOver(true); }} onDragLeave={(e) => { if (e.currentTarget === e.target) setOver(false); }} onDrop={onDrop}>
+    <div className="grid h-full grid-cols-1 lg:min-h-0 lg:grid-cols-[300px_minmax(0,1fr)]" onDragOver={(e) => { e.preventDefault(); setOver(true); }} onDragLeave={(e) => { if (e.currentTarget === e.target) setOver(false); }} onDrop={onDrop}>
       {pickers}
       <Settings options={options} setOpt={setOpt} preset={preset} setPreset={(id) => { const p = ICON_PRESETS.find((x) => x.id === id); if (p) { setOptions(p.options); setPreset(id); } }}
         naming={naming} setNaming={setNaming} ext={ext} sample={done[0] ? fileNameOf(done[0], 1) : null} />
 
-      <section className={`order-1 lg:order-2 glass rounded-2xl min-w-0 transition ${over ? "ring-2 ring-brand-400" : ""}`} aria-label="Icons">
-        <div className="sticky top-0 z-10 flex flex-wrap items-center gap-2 rounded-t-2xl border-b border-white/5 bg-[#0b0e1c]/90 backdrop-blur px-3 py-2.5">
+      <section className={`order-1 flex min-w-0 flex-col bg-[#090b15] transition lg:order-2 lg:min-h-0 ${over ? "ring-2 ring-inset ring-brand-400" : ""}`} aria-label="Icons">
+        <div className="sticky top-12 z-10 flex shrink-0 flex-wrap items-center gap-2 border-b border-white/[0.06] bg-[#0b0d19]/95 px-3 py-2 backdrop-blur lg:static">
           <div className="mr-auto text-sm text-white">
             {items.length} {items.length === 1 ? "file" : "files"}
             <span className="ml-2 text-xs text-white/50">
@@ -246,7 +248,8 @@ export default function IconBatch({ incoming, onEdit, active }: Props) {
         {pending > 0 && (
           <div className="h-1 bg-white/5"><div className="h-full bg-gradient-to-r from-brand-500 to-violet-500 transition-all" style={{ width: `${((items.length - pending) / items.length) * 100}%` }} /></div>
         )}
-        <ul className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-2.5 p-3">
+        <div className="lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
+        <ul className="grid grid-cols-2 gap-2.5 p-3 sm:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 min-[1800px]:grid-cols-6">
           {items.map((it, i) => (
             <Card key={it.id} it={it} name={it.status === "done" ? fileNameOf(it, i + 1) : null} background={options.background} open={openId === it.id}
               onToggle={(b) => update(it.id, { selected: b })} onRemove={() => remove(it.id)} onEdit={() => onEdit(it.file)}
@@ -254,6 +257,7 @@ export default function IconBatch({ incoming, onEdit, active }: Props) {
           ))}
         </ul>
         <p className="px-4 pb-3 text-[11px] text-white/35">Drop more files or folders anywhere here to add them. Nothing is uploaded — icons are made in your browser.</p>
+        </div>
       </section>
     </div>
   );
@@ -268,7 +272,7 @@ function Settings({ options: o, setOpt, preset, setPreset, naming, setNaming, ex
   const [custom, setCustom] = useState("");
   const sizeValue = o.size === "native" ? "native" : String(o.size);
   return (
-    <aside className="order-2 lg:order-1 glass rounded-2xl p-4 space-y-5 lg:sticky lg:top-4" aria-label="Icon settings">
+    <aside className="order-2 space-y-5 border-t border-white/[0.07] bg-[#0c0f1c] p-4 lg:order-1 lg:min-h-0 lg:overflow-y-auto lg:border-r lg:border-t-0" aria-label="Icon settings">
       <Section title="Start from">
         <div className="grid grid-cols-2 gap-1.5">
           {ICON_PRESETS.map((p) => (

@@ -1,13 +1,13 @@
-import Compressor from "@/components/Compressor";
+import LandingTools from "@/components/LandingTools";
 import Link from "next/link";
 
 export default function Home() {
   return (
     <main className="grid-bg relative min-h-dvh">
-      <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 py-6 sm:py-10">
+      <div className="mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8 py-6 sm:py-10">
         {/* Header */}
-        <header className="flex items-center justify-between mb-6 sm:mb-8">
-          <div className="flex items-center gap-2.5">
+        <header className="flex items-center justify-between gap-3 mb-10 sm:mb-14">
+          <Link href="/" className="flex items-center gap-2.5">
             <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-brand-500 to-violet-500 grid place-items-center shadow-lg shadow-brand-500/30">
               <svg viewBox="0 0 24 24" className="h-5 w-5 fill-white" aria-hidden>
                 <path d="M4 4h6v6H4V4zm10 0h6v6h-6V4zM4 14h6v6H4v-6zm10 0h6v6h-6v-6z" />
@@ -17,39 +17,28 @@ export default function Home() {
               <div className="text-sm font-semibold tracking-tight">SVGA Studio</div>
               <div className="text-[11px] text-white/50">for .svga animations</div>
             </div>
-          </div>
-          <a
-            href="https://github.com/svga/SVGA-Format"
-            target="_blank"
-            rel="noreferrer"
-            className="hidden sm:inline-flex items-center gap-1.5 text-xs text-white/60 hover:text-white transition"
-          >
-            SVGA format spec
-            <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 fill-current">
-              <path d="M14 3h7v7h-2V6.414l-8.293 8.293-1.414-1.414L17.586 5H14V3zM5 5h5v2H7v10h10v-3h2v5H5V5z" />
-            </svg>
-          </a>
+          </Link>
+          <nav className="flex items-center gap-1 text-sm">
+            <Link href="/edit" className="hidden rounded-lg px-3 py-1.5 text-white/65 hover:bg-white/5 hover:text-white sm:block">Editor</Link>
+            <Link href="/icons" className="hidden rounded-lg px-3 py-1.5 text-white/65 hover:bg-white/5 hover:text-white sm:block">Batch icons</Link>
+            <a href="#faq" className="hidden rounded-lg px-3 py-1.5 text-white/65 hover:bg-white/5 hover:text-white md:block">FAQ</a>
+            <Link href="/edit" className="ml-1 rounded-lg bg-white px-3.5 py-1.5 text-sm font-semibold text-[#070914] hover:bg-white/90">Open the app</Link>
+          </nav>
         </header>
 
         {/* Hero */}
-        <section className="mb-6 sm:mb-8">
-          <h1 className="text-3xl sm:text-4xl lg:text-5xl font-bold tracking-tight leading-[1.05]">
+        <section className="mb-8 sm:mb-10 text-center">
+          <h1 className="mx-auto max-w-3xl text-3xl sm:text-5xl font-bold tracking-tight leading-[1.08]">
             Edit and shrink <span className="gradient-text">.svga</span> animations, in your browser.
           </h1>
-          <p className="mt-3 max-w-2xl text-sm sm:text-base text-white/60">
-            Drop any .svga — every text in it is found and listed. Retype a name, a level, a rank in
-            the original look, swap pictures, compress, download. Or drop a whole folder and get an
-            icon of every animation in one zip. Nothing is uploaded anywhere.
+          <p className="mx-auto mt-4 max-w-2xl text-sm sm:text-base text-white/60">
+            Retype any name, level or rank in its original look, swap pictures, compress — or turn a
+            whole folder of animations into icons. Free, no sign-up, and nothing is uploaded.
           </p>
-          <ol className="mt-4 flex flex-wrap gap-x-6 gap-y-1 text-xs text-white/50">
-            <li><span className="text-white/80 font-medium">1</span> Drop a file — or the whole set</li>
-            <li><span className="text-white/80 font-medium">2</span> Type over any text in the list, or draw a box around one</li>
-            <li><span className="text-white/80 font-medium">3</span> Build, check the Result view, download</li>
-          </ol>
         </section>
 
-        {/* Tool */}
-        <Compressor />
+        {/* The two tools */}
+        <LandingTools />
 
         {/* Feature strip */}
         <section className="mt-16 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -80,7 +69,7 @@ export default function Home() {
         </section>
 
         {/* FAQ */}
-        <section className="mt-16 space-y-6">
+        <section id="faq" className="mt-16 scroll-mt-6 space-y-6">
           <h2 className="text-xl font-semibold">FAQ</h2>
           <Faq q="What is an SVGA file?">
             SVGA is a bitmap-based animation format (.svga) used widely for live-streaming gifts,
@@ -106,7 +95,7 @@ export default function Home() {
             change. Anything not listed: draw a box around it on the stage.
           </Faq>
           <Faq q="How do I make icons for many files?">
-            Switch to Batch icons and drop the files, or whole folders. Each animation is rendered at
+            Open Batch icons and drop the files, or whole folders. Each animation is rendered at
             its most detailed frame (or the start, middle or end, or a frame you pick per file),
             trimmed and sized to your settings — PNG, WebP or JPEG — and everything downloads as one
             zip that keeps your folders.
