@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import type { MovieFile } from "@/lib/svga";
 import { formatBytes } from "@/lib/compress";
-import { bitmapThumbnail } from "@/lib/text-edit";
+import { renderFrameCanvas } from "@/lib/renderer";
 
 export type LoadedFile = { file: File; movie: MovieFile };
 
@@ -81,16 +81,12 @@ function Thumb({ movie }: { movie: MovieFile }) {
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
-    let made: string | null = null;
-    // The first bitmap is usually the base; good enough for a 40px thumb.
-    const key = Object.keys(movie.images)[0];
-    if (!key) return;
-    bitmapThumbnail(movie, key, 80).then((u) => {
-      if (cancelled) { if (u) URL.revokeObjectURL(u); return; }
-      made = u;
-      setUrl(u);
-    });
-    return () => { cancelled = true; if (made) URL.revokeObjectURL(made); };
+    // The middle frame, small: what the animation looks like, not just its first bitmap.
+    const s = Math.min(1, 80 / Math.max(1, movie.params.viewBoxWidth, movie.params.viewBoxHeight));
+    renderFrameCanvas(movie, Math.floor(Math.max(1, movie.params.frames) / 2), s)
+      .then((c) => { if (!cancelled) setUrl(c.toDataURL()); })
+      .catch(() => {});
+    return () => { cancelled = true; };
   }, [movie]);
   return (
     <div className="h-10 w-10 shrink-0 rounded-lg checkerboard grid place-items-center overflow-hidden">

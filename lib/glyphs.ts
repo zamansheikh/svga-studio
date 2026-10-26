@@ -8,7 +8,7 @@
  * every digit casts — and composes any new text from them. The result uses
  * the set's own lettering, pixel for pixel, rather than a substitute font.
  */
-import type { Raster, Rect } from "./text-edit";
+import type { Raster, Rect } from "./text/raster";
 
 export type GlyphSample = { text: string; raster: Raster };
 

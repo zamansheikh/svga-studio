@@ -3,7 +3,7 @@
 import type { ReactNode } from "react";
 import { formatBytes } from "@/lib/compress";
 
-export type InspectorTab = "text" | "compress" | "watermark";
+export type InspectorTab = "text" | "layers" | "compress" | "watermark";
 
 type Props = {
   tab: InspectorTab;
@@ -25,6 +25,7 @@ type Props = {
 
 const TABS: { id: InspectorTab; label: string }[] = [
   { id: "text", label: "Text" },
+  { id: "layers", label: "Layers" },
   { id: "compress", label: "Compress" },
   { id: "watermark", label: "Watermark" },
 ];
@@ -45,7 +46,7 @@ export default function Inspector({ tab, onTab, panels, active, originalSize, re
         ))}
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 max-h-[52vh] lg:max-h-[60vh]">
+      <div className="flex-1 overflow-y-auto p-4 max-h-[60vh] lg:max-h-[66vh]">
         {panels[tab]}
       </div>
 

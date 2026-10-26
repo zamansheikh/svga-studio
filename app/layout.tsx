@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import { fontVariables } from "./fonts";
 
 const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "https://svga-compressor.vercel.app";
 
@@ -79,7 +80,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
+    <html lang="en" className={fontVariables}>
       <body className="min-h-dvh font-sans antialiased">
         {children}
       </body>

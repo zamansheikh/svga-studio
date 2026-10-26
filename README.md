@@ -1,7 +1,7 @@
 # SVGA Studio
 
-Modern, 100% client-side studio for **SVGA 2.x** animation files (`.svga`): preview,
-compress, watermark, and replace the text baked into a badge — in the original lettering.
+Modern, 100% client-side editor for **SVGA** animation files (`.svga`): preview,
+edit every kind of text in them, swap layers, compress, watermark.
 
 Formerly *SVGA Compressor*; the old repository URL redirects here.
 Built with Next.js 16, React 19, TypeScript, Tailwind. Deploys to Vercel in one click.
@@ -11,26 +11,28 @@ Built with Next.js 16, React 19, TypeScript, Tailwind. Deploys to Vercel in one 
 
 ## Features
 
-- Drag-and-drop upload (or tap on mobile) — drop a whole set of files at once
-- **Replace the text** painted into an animation (a level number, a rank label) — see below
-- Remove a bitmap and every sprite drawn from it
+- Opens **every SVGA**: 2.x (zlib, gzip, raw deflate or bare protobuf, extra bytes
+  after the data tolerated) and 1.x (zip with `movie.spec` or `movie.binary`,
+  converted on load; downloads as 2.x)
+- Faithful preview: bitmaps, vector shapes, clip paths, masks (`matteKey`), sound,
+  the file's own frame rate; frame stepping and PNG export of any frame
+- **Edit every text in the file**, each on its own — see [Editing text](#editing-text)
+- **Layers**: replace any bitmap with a picture (fitted to its exact size), delete a
+  bitmap with every sprite that draws it, remove sounds; hidden layers flagged
 - Merge identical bitmaps; strip hidden exporter metadata (tool, author email, timestamp)
-- Side-by-side original vs compressed preview, with play/pause/seek
-- Quality (1–100), scale (25–100%), and output format (WebP / PNG / JPEG) controls
-- File-size stats and per-image progress
-- One-click download of the compressed `.svga`
-- Nothing leaves your browser — decode, re-encode, and gzip happen on-device
-- Mobile-first, dark, responsive UI
-- Proper favicon, web manifest, Open Graph + Twitter cards, robots, sitemap
-- Edge-generated PNG OG image via Next's `next/og`
+- Quality, scale and output format (WebP / PNG / JPEG) controls; edited bitmaps are
+  stored the way the originals were (palette PNG stays palette PNG)
+- Series: one file per value (`1-20`, `Gold, Silver`) for any text, zipped
+- Nothing leaves your browser — decode, edit, re-encode and compress happen on-device
 
 ## Tech
 
-- `next@16` (App Router) · `react@19`
-- `protobufjs` — parses the SVGA 2.x protobuf schema at runtime (no codegen step)
-- `pako` — gzip inflate/deflate in the browser
-- Canvas / OffscreenCanvas — image re-encoding and preview rendering
-- `tailwindcss@3`
+- `next@16` (App Router) · `react@19` · `tailwindcss@3`
+- `protobufjs` (wire reader/writer) and `pako` — SVGA decode/encode, tolerant of exporter quirks
+- Canvas / OffscreenCanvas — rendering, text detection, erasing and drawing
+- `tesseract.js` — reads the text the detector found (served from `/ocr` by this site,
+  copied there from `node_modules` by `scripts/copy-ocr.mjs` before `dev`/`build`)
+- `next/font` — the bundled fonts for new text, self-hosted
 
 ## Local development
 
@@ -39,6 +41,9 @@ npm install
 npm run dev
 # open http://localhost:3000
 ```
+
+`/lab` (development only, 404 in production) exposes the engine on `window.__lab`
+for scripted checks.
 
 ## Build
 
@@ -64,82 +69,49 @@ npx vercel
 
 Three columns. **Files** on the left lists everything you dropped and marks
 which ones are siblings of the file being edited. The **Stage** in the middle
-is one large player with three views — *Original*, *Edited* (your text, live),
-*Result* (what you will download); keys 1/2/3 switch, space plays. The
-**Inspector** on the right has three tabs — *Text*, *Compress*, *Watermark* —
-and a footer with before/after size and a single *Build → Download* action.
-When the text has been located, its region is drawn on the stage as a box you
-can drag and resize.
+plays the animation in three views — *Original*, *Edited* (your edits, live),
+*Result* (what you will download); keys 1/2/3 switch, space plays, `,` and `.`
+step a frame. The **Inspector** on the right has four tabs — *Text*, *Layers*,
+*Compress*, *Watermark* — and a footer with before/after size and a single
+*Build → Download* action.
 
-## Replacing text
+## Editing text
 
-Open a file, type the new text in the *Text* tab. The stage switches to
-*Edited* and updates as you type; *Build result* bakes it into the download.
+Open a file: the *Text* tab lists every text found in it, each with a crop of
+the original and what it reads. Type into one to replace it; the stage shows
+the result live. Text that isn't listed: press **Select text on the stage** and
+drag a box around it.
 
-Where the text lives is worked out in three ways, tried in this order:
+What counts as text, and how each kind is edited:
 
-1. **Comparing siblings.** Load the whole set (level-41 … level-50) and the
-   bitmaps that differ between files are the text. Exact, and the status says
-   *Found it*.
-2. **Reading the frames.** With a single file, a few frames are rendered and
-   scanned for lettering: light strokes with dark edges, sitting on one line,
-   of one height, one colour and one stroke thickness. The sprite that owns
-   those pixels (top-most, clip paths honoured) becomes the target. Layers
-   that carry the same letters — a drop shadow, a glow, a clipped shine sweep,
-   a copy baked into the ribbon — are repainted too, each in its own colour.
-   Clean lettering shows a green *text found here* box; a weaker candidate
-   shows an amber *best guess* box and the status reads *Probably here*.
-3. **A plain guess.** Nothing text-like at all: the box lands where badge
-   text usually is. Drag it.
+| Kind | What it is | Edit |
+| --- | --- | --- |
+| **Text slot** | An empty bitmap the app fills at runtime (`name1`, `lvtag`, `text1`) | The text is drawn into it, centred like the players draw dynamic text. The app can still replace it. |
+| **Image slot** | An empty bitmap for an avatar or gift (`avatar`, `gift`) | Choose a picture; it is fitted to the slot (optionally a circle). |
+| **Text layer** | Letters on their own transparent layer, often stacked with a shadow and a highlight copy (`VIP 5`) | Each copy is cleared and redrawn — the main one in the new look, the copies in their own colours. |
+| **On artwork** | Letters painted into a ribbon or plate, possibly into every frame of an image sequence | Only the letter pixels are erased (the background around them is filled in), then the new text is drawn, frame by frame; frames where the old text faded keep the fade. |
+| **Hidden** | Text that never shows — 1% opacity or off the canvas, typically a seller's watermark | Delete the layer, or erase its text. |
 
-Two kinds of edit follow:
+**Finding text.** Each bitmap is searched on its own (one frame of each
+sequence), so nothing drawn on top gets in the way: the bitmap is cut at
+several brightness levels, for light and for dark lettering, and through its
+transparency; blobs that look like glyphs (one even stroke width, sharp edges,
+a sensible size) are chained into lines that share a baseline; ornaments are
+filtered out (mirror-symmetric pairs, repeated studs, bands along a plate).
+Text in a sequence must stay put from frame to frame. Then OCR reads each line
+from the clean letter mask — read text is confirmed and shown; unreadable
+candidates go under *possible*. When the other files of a numbered set are
+loaded (level-41 … level-50), the bitmaps that differ between them are the
+text, exactly, and the set's own digits are lifted so a new number can be
+written in the original lettering.
 
-- **the text is its own bitmap** — a small label sprite placed over the badge.
-  It is re-rendered at the same size and swapped. Nothing else changes.
-- **the text is painted into a larger bitmap** — digits baked onto the pill.
-  The region is painted back over from its surroundings and the new text is
-  drawn on top, in the colour the old text had.
-
-**Lettering.** When a numbered set is loaded (level-41 … level-50), the
-digits are lifted from the files themselves — background rebuilt from the
-siblings, each glyph as an anti-aliased mask with its colour and shadow — and
-the new number is composed from them, centred where the originals sit. The
-result is the set's own font, pixel for pixel. Switch to *A font* to draw any
-text with a system font instead; that is also what happens when the names
-carry no numbers.
-
-**Series.** *Make a series* takes a range or list (`1-20`, `5, 10, 15`) and
-builds one file per value with the current lettering, compression and
-watermark settings, named after the active file (level-41 → level-7), as a
-zip.
-
-Whatever was found, the box on the stage can be dragged and resized. A box
-moved by hand keeps the companion layers found for that bitmap, so the shadow
-under the new text moves with it.
-
-In a batch of sixteen assets of mixed kinds (role frames, VIP/SVIP badges,
-tags, medals, banners, a chat bubble, a gift) eleven were edited correctly
-without touching the box; the other five needed the box dragged onto the
-text — a tiny label inside an emblem, calligraphic script, a banner whose
-text has no dark edge, and a gift with 3-D digits.
-
-To locate it, drop the file's **siblings** — other files from the same export
-with different text (`level-41.svga` … `level-49.svga` beside `level-50.svga`).
-Dropping the whole set onto the main dropzone does this automatically; a
-picker lets you choose which one to edit. The bitmap that differs between
-siblings is the one carrying text, and the union of the differing pixels is
-where it sits. Every sibling is tried and the one that differs least wins —
-a file from a different colour band lights up the whole badge and is
-discarded. Transparent pixels are ignored (their colour is undefined and
-varies between exports), and re-encoding noise is thresholded away.
-
-Without siblings, a label-shaped bitmap is swapped; anything else needs a
-bitmap picked and a region set by hand.
-
-The new text takes the old text's colour, sampled from the bitmap, unless you
-pick a look (gold, silver, white with outline, …) or set your own. Text is set
-in the system font through Canvas, and the edited bitmap goes through the
-same compression as the rest.
+**Matching the look.** The original letters are measured — height and
+baseline, slant, stroke weight, fill (flat, or a top-to-bottom gradient) and
+outline — and the new text starts in that look, in the bundled font whose
+shapes are closest. Everything can be changed: font (or upload one), weight,
+italic and slant, letter height, squeeze/shrink to fit, alignment, spacing,
+colours and gradient stops, outline, shadow, position. The box on the stage
+can be dragged and resized; the text follows it.
 
 ## How compression works
 

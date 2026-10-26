@@ -1,26 +1,35 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import JSZip from "jszip";
 import Dropzone from "./Dropzone";
 import FilesPanel, { type LoadedFile } from "./FilesPanel";
 import Stage, { type StageView } from "./Stage";
 import Inspector, { type InspectorTab } from "./Inspector";
-import TextEdit from "./TextEdit";
+import TextPanel from "./TextPanel";
+import LayersPanel from "./LayersPanel";
 import Controls from "./Controls";
 import Watermark from "./Watermark";
+import type { OverlayBox } from "./ItemOverlay";
 import { compressMovieImages, type CompressOptions } from "@/lib/compress";
 import { decodeSvga, dedupeImages, encodeSvga, paramsExtraFieldCount, stripParamsMetadata, type MovieFile } from "@/lib/svga";
 import { applyWatermark, defaultWatermark, type WatermarkConfig } from "@/lib/watermark";
-import { analyzeMovie, applyTextEdit, defaultTextEdit, guessRegion, isSibling, type Analysis, type Rect, type SiblingFile, type TextEditConfig } from "@/lib/text-edit";
-import JSZip from "jszip";
+import { MIN_ALPHA, resolveImageKey, spritesOf } from "@/lib/renderer";
+import { applyLayerEdits, emptyLayerEdits, hasLayerEdits, type LayerEdits } from "@/lib/layers";
+import {
+  analyzeText, applyItems, editRasters, fitImage, isEdited, isSibling, itemFromRect, readItems, withRegion,
+  type SiblingFile, type TextAnalysis, type TextItem,
+} from "@/lib/text/items";
+import { rasterOfBytes, rasterToCanvas, type Rect } from "@/lib/text/raster";
+import type { Transform } from "@/lib/movie";
 
 type Progress = { done: number; total: number; label: string };
 
 /**
- * The page's brain. Three columns: files, stage, inspector. State flows
- * one way — load → (edit live) → build → download — and the stage always
- * shows the most interesting thing: the edit while you type, the result
- * once it is built.
+ * The editor. Files on the left, the stage in the middle, the inspector on
+ * the right. Text items come from analysing the file (and its siblings) or
+ * from boxes drawn on the stage; every edit shows live in the Edited view
+ * and is baked into the file on Build.
  */
 export default function Workspace() {
   const [files, setFiles] = useState<LoadedFile[]>([]);
@@ -28,13 +37,17 @@ export default function Workspace() {
   const [original, setOriginal] = useState<MovieFile | null>(null);
   const [siblings, setSiblings] = useState<SiblingFile[]>([]);
 
-  const [textEdit, setTextEdit] = useState<TextEditConfig>(defaultTextEdit);
-  const [analysis, setAnalysis] = useState<Analysis | null>(null);
+  const [layerEdits, setLayerEdits] = useState<LayerEdits>(emptyLayerEdits);
+  const [analysis, setAnalysis] = useState<TextAnalysis | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
-  const [edited, setEdited] = useState<MovieFile | null>(null);
+  const [reading, setReading] = useState(false);
+  const [items, setItems] = useState<TextItem[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectMode, setSelectMode] = useState(false);
+  const [override, setOverride] = useState<Map<string, CanvasImageSource> | null>(null);
   const [editError, setEditError] = useState<string | null>(null);
 
-  const [options, setOptions] = useState<CompressOptions>({ scale: 0.75, quality: 0.8, format: "png", colors: 128, dedupe: true, stripMetadata: false });
+  const [options, setOptions] = useState<CompressOptions>({ scale: 1, quality: 0.85, format: "png", colors: 0, dedupe: true, stripMetadata: false });
   const [watermark, setWatermark] = useState<WatermarkConfig>(defaultWatermark);
 
   const [result, setResult] = useState<{ movie: MovieFile; bytes: Uint8Array; signature: string } | null>(null);
@@ -44,25 +57,29 @@ export default function Workspace() {
 
   const [view, setView] = useState<StageView>("original");
   const [tab, setTab] = useState<InspectorTab>("text");
-  const editRun = useRef(0);
-  // Jump to the Edited view the first time an edit appears — and only then.
-  // Re-jumping on every keystroke or region drag would pull the stage out
-  // from under the user while they adjust the box.
-  const jumpedToEdited = useRef(false);
+  const [seek, setSeek] = useState<{ frame: number; nonce: number } | null>(null);
+  const [highlight, setHighlight] = useState<{ transform: Transform; width: number; height: number } | null>(null);
+  const frameRef = useRef(0);
+  const touched = useRef(false);
+  const jumped = useRef(false);
 
-  const decode = async (f: File) => decodeSvga(new Uint8Array(await f.arrayBuffer()));
+  /* ---------------- files ---------------- */
 
   const pick = useCallback((target: LoadedFile, all: LoadedFile[]) => {
     setActiveFile(target.file);
     setOriginal(target.movie);
     setSiblings(all.filter((x) => x !== target && isSibling(target.movie, x.movie)).map((x) => ({ name: x.file.name, movie: x.movie })));
-    setResult(null);
-    setEdited(null);
+    setLayerEdits(emptyLayerEdits());
+    setItems([]);
     setAnalysis(null);
+    setSelectedId(null);
+    setSelectMode(false);
+    setResult(null);
+    setOverride(null);
     setEditError(null);
-    setTextEdit((t) => ({ ...t, target: "auto", region: null, regionGuessed: false, remove: [] }));
     setView("original");
-    jumpedToEdited.current = false;
+    touched.current = false;
+    jumped.current = false;
   }, []);
 
   const load = useCallback(async (incoming: File[], append: boolean) => {
@@ -73,22 +90,17 @@ export default function Workspace() {
       if (!/\.svga$/i.test(f.name)) continue;
       if (append && files.some((x) => x.file.name === f.name)) continue;
       try {
-        loaded.push({ file: f, movie: await decode(f) });
+        loaded.push({ file: f, movie: await decodeSvga(new Uint8Array(await f.arrayBuffer())) });
       } catch (e) {
         firstError ??= `${f.name}: ${(e as Error).message}`;
       }
     }
     if (firstError) setError(firstError);
     const all = append ? [...files, ...loaded] : loaded;
-    if (!all.length) {
-      if (!firstError) setError("No readable .svga files.");
-      return;
-    }
+    if (!all.length) { if (!firstError) setError("No readable .svga files."); return; }
     setFiles(all);
-    if (!append || !activeFile) {
-      pick(all[0], all);
-      setTextEdit(defaultTextEdit);
-    } else {
+    if (!append || !activeFile) pick(all[0], all);
+    else {
       const cur = all.find((x) => x.file === activeFile);
       if (cur) setSiblings(all.filter((x) => x !== cur && isSibling(cur.movie, x.movie)).map((x) => ({ name: x.file.name, movie: x.movie })));
     }
@@ -96,96 +108,203 @@ export default function Workspace() {
 
   const clear = useCallback(() => {
     setFiles([]); setActiveFile(null); setOriginal(null); setSiblings([]);
-    setTextEdit(defaultTextEdit); setAnalysis(null); setEdited(null); setEditError(null);
-    setResult(null); setProgress(null); setError(null); setView("original"); setTab("text");
-    jumpedToEdited.current = false;
+    setItems([]); setAnalysis(null); setSelectedId(null); setLayerEdits(emptyLayerEdits());
+    setResult(null); setProgress(null); setError(null); setView("original"); setTab("text"); setOverride(null);
   }, []);
 
-  // Where is the text? Re-asked when the inputs to that question change.
+  /* ---------------- analysis ---------------- */
+
   useEffect(() => {
-    if (!original || !textEdit.enabled) { setAnalysis(null); return; }
+    if (!original) return;
     let cancelled = false;
     setAnalyzing(true);
-    analyzeMovie(original, siblings, textEdit, activeFile?.name ?? "")
-      .then((a) => {
+    (async () => {
+      try {
+        const a = await analyzeText(original, siblings, activeFile?.name ?? "");
         if (cancelled) return;
         setAnalysis(a);
-        // Nothing measurable and nothing chosen: put a box somewhere sensible
-        // so there is something on the stage to drag, and say it is a guess.
-        if (!a.plans.length && !textEdit.region) {
-          const g = guessRegion(a.bitmaps, textEdit.target === "auto" ? undefined : textEdit.target);
-          if (g) setTextEdit((t) => ({ ...t, target: g.key, region: g.region, regionGuessed: true }));
-        }
-        // A real finding (a diff, or text detected in a frame) beats a guess
-        // placed earlier. The plan a guessed region itself produces is
-        // "manual", so it never resets the guess — that would loop.
-        if ((a.source === "diff" || a.source === "detected") && textEdit.regionGuessed) {
-          setTextEdit((t) => ({ ...t, target: "auto", region: null, regionGuessed: false }));
-        }
-      })
-      .catch((e) => { if (!cancelled) setEditError((e as Error).message); })
-      .finally(() => { if (!cancelled) setAnalyzing(false); });
+        // Keep what the user picked by hand and any edits made meanwhile.
+        setItems((prev) => {
+          const manual = prev.filter((p) => p.source === "manual");
+          return [...manual, ...a.items];
+        });
+        setAnalyzing(false);
+        // Read the text of each item in the background (OCR loads on first use).
+        setReading(true);
+        const probes = a.items.map((i) => ({ ...i }));
+        await readItems(probes, (it) => {
+          if (cancelled) return;
+          setItems((prev) => {
+            const next = prev.map((p) => {
+              if (p.id !== it.id) return p;
+              // The look the user hasn't changed follows the matched font.
+              const untouched = JSON.stringify(p.style) === JSON.stringify(p.matched);
+              return { ...p, original: it.original, verified: it.verified, score: it.score, confident: it.confident, matched: it.matched, style: untouched ? it.matched : p.style };
+            });
+            // Re-rank by what was read, until the user starts working with the list.
+            return touched.current ? next : [...next].sort((x, y) => (x.source === "manual" ? -1 : y.source === "manual" ? 1 : y.score - x.score));
+          });
+        });
+        if (!cancelled) setReading(false);
+      } catch (e) {
+        if (!cancelled) { setError(`Text analysis failed: ${(e as Error).message}`); setAnalyzing(false); setReading(false); }
+      }
+    })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [original, siblings, textEdit.enabled, textEdit.target, textEdit.mode, textEdit.region]);
+  }, [original, siblings]);
 
-  // Live edit, a beat after typing stops.
+  /* ---------------- live edits ---------------- */
+
+  const base = useMemo(() => (original ? applyLayerEdits(original, layerEdits) : null), [original, layerEdits]);
+  const anyText = items.some(isEdited);
+  const anyEdit = anyText || hasLayerEdits(layerEdits);
+
   useEffect(() => {
-    const wants = original && ((textEdit.enabled && textEdit.text.trim()) || textEdit.remove.length);
-    if (!wants) {
-      setEdited(null);
-      setEditError(null);
-      jumpedToEdited.current = false;
-      if (view === "edited") setView("original");
-      return;
-    }
-    if (textEdit.enabled && !analysis) return;
-    const run = ++editRun.current;
+    if (!base || !anyText) { setOverride(null); setEditError(null); return; }
+    let cancelled = false;
     const t = setTimeout(async () => {
       try {
-        const { movie } = await applyTextEdit(original!, siblings, textEdit, analysis ?? undefined);
-        if (editRun.current !== run) return;
-        setEdited(movie);
+        const rasters = await editRasters(base, items, analysis?.glyphs ?? null);
+        if (cancelled) return;
+        // The player looks bitmaps up by the sprite's imageKey, which may differ from the map key.
+        const map = new Map<string, CanvasImageSource>();
+        const canvases = new Map<string, CanvasImageSource>();
+        for (const [k, r] of rasters) canvases.set(k, rasterToCanvas(r) as CanvasImageSource);
+        for (const s of spritesOf(base)) { const k = resolveImageKey(base, s.imageKey); if (k && canvases.has(k)) map.set(s.imageKey, canvases.get(k)!); }
+        for (const [k, c] of canvases) if (!map.has(k)) map.set(k, c);
+        setOverride(map);
         setEditError(null);
-        if (!jumpedToEdited.current && view !== "result") {
-          setView("edited");
-          jumpedToEdited.current = true;
-        }
+        if (!jumped.current && view === "original") { setView("edited"); jumped.current = true; }
       } catch (e) {
-        if (editRun.current !== run) return;
-        setEdited(null);
-        setEditError((e as Error).message);
+        if (!cancelled) setEditError((e as Error).message);
       }
-    }, 250);
-    return () => clearTimeout(t);
+    }, 120);
+    return () => { cancelled = true; clearTimeout(t); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [original, siblings, textEdit, analysis]);
+  }, [base, items, analysis]);
 
-  // A built result belongs to one exact set of inputs; anything else makes it stale.
-  const signature = useMemo(
-    () => JSON.stringify({ f: activeFile?.name, t: textEdit, o: options, w: watermark, e: edited ? 1 : 0 }),
-    [activeFile, textEdit, options, watermark, edited],
-  );
+  useEffect(() => {
+    if (hasLayerEdits(layerEdits) && !jumped.current && view === "original") { setView("edited"); jumped.current = true; }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [layerEdits]);
+
+  /* ---------------- items ---------------- */
+
+  const updateItem = useCallback((it: TextItem) => {
+    touched.current = true;
+    setItems((prev) => prev.map((p) => (p.id === it.id ? it : p)));
+  }, []);
+
+  const select = useCallback((id: string | null) => {
+    setSelectedId(id);
+    if (!id) return;
+    touched.current = true;
+    const it = items.find((i) => i.id === id);
+    if (it) setSeek({ frame: it.frame, nonce: Date.now() });
+  }, [items]);
+
+  const onSelectRect = useCallback(async (rect: Rect, frame: number) => {
+    if (!base) return;
+    setSelectMode(false);
+    try {
+      const it = await itemFromRect(base, frame, rect);
+      if (!it) { setEditError("Nothing drawn there on this frame — try another frame or a bigger box."); return; }
+      touched.current = true;
+      setItems((prev) => [it, ...prev]);
+      setSelectedId(it.id);
+      setEditError(null);
+    } catch (e) {
+      setEditError((e as Error).message);
+    }
+  }, [base]);
+
+  const onRegionChange = useCallback((id: string, r: Rect) => {
+    touched.current = true;
+    setItems((prev) => prev.map((p) => (p.id === id ? withRegion(p, r) : p)));
+  }, []);
+
+  const onImage = useCallback(async (it: TextItem, file: File, circle: boolean) => {
+    const L = it.layers[0];
+    try {
+      const bytes = await fitImage(file, L.region.width, L.region.height, { circle });
+      setLayerEdits((e) => ({ ...e, replaced: { ...e.replaced, [L.key]: bytes } }));
+    } catch {
+      setError("That image couldn't be read.");
+    }
+  }, []);
+
+  const onReplaceLayer = useCallback(async (key: string, file: File) => {
+    const r = original ? await rasterOfBytes(original.images[key]) : null;
+    if (!r) return;
+    try {
+      const bytes = await fitImage(file, r.width, r.height, { mode: "contain" });
+      setLayerEdits((e) => ({ ...e, replaced: { ...e.replaced, [key]: bytes } }));
+    } catch {
+      setError("That image couldn't be read.");
+    }
+  }, [original]);
+
+  const onDeleteLayer = useCallback((it: TextItem) => {
+    const keys = [...new Set(it.layers.flatMap((l) => l.keys))];
+    setLayerEdits((e) => ({ ...e, removed: [...new Set([...e.removed, ...keys])] }));
+    setItems((prev) => prev.filter((p) => p.id !== it.id));
+    setSelectedId(null);
+  }, []);
+
+  // Escape: stop drawing a box, then deselect.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (selectMode) setSelectMode(false);
+      else setSelectedId(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selectMode]);
+
+  /* ---------------- layer highlight ---------------- */
+
+  const onHoverLayer = useCallback(async (key: string | null) => {
+    if (!key || !base) { setHighlight(null); return; }
+    const sprites = spritesOf(base);
+    const f = frameRef.current;
+    let t: Transform | null = null;
+    for (const s of sprites) {
+      if (resolveImageKey(base, s.imageKey) !== key) continue;
+      const fr = s.frames[f]?.alpha > MIN_ALPHA ? s.frames[f] : s.frames.find((x) => x.alpha > MIN_ALPHA);
+      if (fr) { t = fr.transform; break; }
+    }
+    const r = await rasterOfBytes(base.images[key]);
+    setHighlight(t && r ? { transform: t, width: r.width, height: r.height } : null);
+  }, [base]);
+
+  /* ---------------- build ---------------- */
+
+  const signature = useMemo(() => JSON.stringify({
+    f: activeFile?.name,
+    t: items.filter(isEdited).map((i) => [i.id, i.text, i.remove, i.style, i.offset, i.layers[0].region, i.lettering]),
+    l: [Object.keys(layerEdits.replaced).map((k) => [k, layerEdits.replaced[k].byteLength]), layerEdits.removed, layerEdits.mutedAudio],
+    o: options, w: watermark,
+  }), [activeFile, items, layerEdits, options, watermark]);
   const stale = !!result && result.signature !== signature;
 
+  const finish = useCallback(async (movie: MovieFile, report?: (p: Progress) => void) => {
+    let next = await compressMovieImages(movie, options, (done, total, label) => report?.({ done, total, label }));
+    if (options.dedupe) next = dedupeImages(next).movie;
+    if (options.stripMetadata) next = { ...next, paramsBytes: stripParamsMetadata(next.paramsBytes).bytes };
+    if (watermark.enabled) { report?.({ done: 1, total: 1, label: "Applying watermark" }); next = await applyWatermark(next, watermark); }
+    return next;
+  }, [options, watermark]);
+
   const build = useCallback(async () => {
-    if (!original) return;
+    if (!base) return;
     setBuilding(true);
     setError(null);
-    setProgress({ done: 0, total: Object.keys(original.images).length, label: "Starting" });
     try {
-      let source = original;
-      if (textEdit.enabled || textEdit.remove.length) {
-        setProgress({ done: 0, total: 1, label: "Replacing text" });
-        source = (await applyTextEdit(original, siblings, textEdit, analysis ?? undefined)).movie;
-      }
-      let next = await compressMovieImages(source, options, (done, total, label) => setProgress({ done, total, label }));
-      if (options.dedupe) next = dedupeImages(next).movie;
-      if (options.stripMetadata) next = { ...next, paramsBytes: stripParamsMetadata(next.paramsBytes).bytes };
-      if (watermark.enabled) {
-        setProgress({ done: 1, total: 1, label: "Applying watermark" });
-        next = await applyWatermark(next, watermark);
-      }
+      let source = base;
+      if (anyText) { setProgress({ done: 0, total: 1, label: "Writing text" }); source = await applyItems(base, items, analysis?.glyphs ?? null); }
+      const next = await finish(source, setProgress);
       setProgress({ done: 1, total: 1, label: "Encoding" });
       const bytes = await encodeSvga(next);
       setResult({ movie: next, bytes, signature });
@@ -196,87 +315,89 @@ export default function Workspace() {
       setBuilding(false);
       setProgress(null);
     }
-  }, [original, siblings, textEdit, analysis, options, watermark, signature]);
+  }, [base, anyText, items, analysis, finish, signature]);
 
-  /**
-   * Build one file per value with the current settings — same look, same
-   * compression, same watermark — and download them as a zip. Names follow
-   * the active file: level-41.svga with "7" becomes level-7.svga.
-   */
   const buildSeries = useCallback(async (values: string[]) => {
-    if (!original || !activeFile || !values.length) return;
+    if (!base || !activeFile || !values.length || !selectedId) return;
     setBuilding(true);
     setError(null);
     const zip = new JSZip();
-    const base = activeFile.name.replace(/\.svga$/i, "");
-    const nameFor = (v: string) => (/\d+(?!.*\d)/.test(base) ? base.replace(/\d+(?!.*\d)/, v) : `${base}-${v}`) + ".svga";
+    const stem = activeFile.name.replace(/\.svga$/i, "");
+    const nameFor = (v: string) => (/\d+(?!.*\d)/.test(stem) && /^\d+$/.test(v) ? stem.replace(/\d+(?!.*\d)/, v) : `${stem}-${v.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "text"}`) + ".svga";
     try {
       for (const [i, value] of values.entries()) {
         setProgress({ done: i, total: values.length, label: `Series · ${value}` });
-        const cfg: TextEditConfig = { ...textEdit, enabled: true, text: value };
-        let next = (await applyTextEdit(original, siblings, cfg, analysis ?? undefined)).movie;
-        next = await compressMovieImages(next, options, () => {});
-        if (options.dedupe) next = dedupeImages(next).movie;
-        if (options.stripMetadata) next = { ...next, paramsBytes: stripParamsMetadata(next.paramsBytes).bytes };
-        if (watermark.enabled) next = await applyWatermark(next, watermark);
+        const variant = items.map((it) => (it.id === selectedId ? { ...it, text: value, remove: false } : it));
+        const next = await finish(await applyItems(base, variant, analysis?.glyphs ?? null));
         zip.file(nameFor(value), await encodeSvga(next));
       }
       setProgress({ done: values.length, total: values.length, label: "Zipping" });
       const blob = await zip.generateAsync({ type: "blob" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${base.replace(/[-_ ]?\d+(?!.*\d)/, "")}-${values[0]}-${values[values.length - 1]}.zip`;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      saveBlob(blob, `${stem.replace(/[-_ ]?\d+(?!.*\d)/, "")}-${values[0]}-${values[values.length - 1]}.zip`.replace(/[^\w.-]+/g, "-"));
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setBuilding(false);
       setProgress(null);
     }
-  }, [original, activeFile, siblings, textEdit, analysis, options, watermark]);
+  }, [base, activeFile, selectedId, items, analysis, finish]);
 
   const downloadName = useMemo(() => {
     if (!activeFile) return null;
-    const base = activeFile.name.replace(/\.svga$/i, "");
-    const tag = textEdit.enabled && textEdit.text.trim() ? `-${textEdit.text.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "edited"}` : ".min";
-    return `${base}${tag}.svga`;
-  }, [activeFile, textEdit]);
+    const stem = activeFile.name.replace(/\.svga$/i, "");
+    const first = items.find((i) => isEdited(i) && i.text.trim());
+    const tag = first ? `-${first.text.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "edited"}` : anyEdit ? "-edited" : ".min";
+    return `${stem}${tag}.svga`;
+  }, [activeFile, items, anyEdit]);
 
   const download = useCallback(() => {
     if (!result || !downloadName) return;
-    const url = URL.createObjectURL(new Blob([result.bytes as BlobPart], { type: "application/octet-stream" }));
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = downloadName;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    saveBlob(new Blob([result.bytes as BlobPart], { type: "application/octet-stream" }), downloadName);
   }, [result, downloadName]);
 
-  // The region box on the stage: the manual region if set, else the detected plan.
-  const stageRegion = useMemo(() => {
-    if (!textEdit.enabled || !analysis) return null;
-    const key = textEdit.target !== "auto" ? textEdit.target : analysis.plans[0]?.key;
-    if (!key) return null;
-    const info = analysis.bitmaps.find((b) => b.key === key);
-    if (!info || !info.placement) return null;
-    const rect = textEdit.region ?? analysis.plans.find((p) => p.key === key)?.region ?? null;
-    if (!rect) return null;
-    return {
-      rect,
-      state: !textEdit.region ? (analysis.source === "detected" && analysis.confidence === "low" ? ("guess" as const) : ("detected" as const)) : textEdit.regionGuessed ? ("guess" as const) : ("manual" as const),
-      placement: info.placement,
-      bitmap: { width: info.width, height: info.height },
-      frame: analysis.detectedOnFrame ?? undefined,
-      onChange: (r: Rect) => setTextEdit((t) => ({ ...t, target: key, region: r, regionGuessed: false })),
-    };
-  }, [textEdit, analysis]);
+  /* ---------------- stage overlay ---------------- */
+
+  const boxes: OverlayBox[] = useMemo(() => items
+    .filter((it) => it.id === selectedId || it.confident || it.source !== "detected" || isEdited(it))
+    .map((it, i) => {
+      const L = it.layers[0];
+      return {
+        id: it.id,
+        region: L.region,
+        transform: L.transform,
+        bounds: { width: Math.max(L.region.x + L.region.width, ...[0]) + 4096, height: L.region.y + L.region.height + 4096 },
+        tone: it.id === selectedId ? "selected" : isEdited(it) ? "edited" : it.kind === "slot" || it.kind === "image-slot" ? "slot" : it.kind === "hidden" ? "hidden" : it.confident ? "found" : "possible",
+        label: it.original ? `“${it.original}”` : it.kind === "slot" ? `slot ${L.key}` : `text ${i + 1}`,
+      } as OverlayBox;
+    }), [items, selectedId]);
+
+  // Real bitmap bounds for dragging, once known.
+  const [bounds, setBounds] = useState<Record<string, { width: number; height: number }>>({});
+  useEffect(() => {
+    if (!base) return;
+    let cancelled = false;
+    (async () => {
+      const out: Record<string, { width: number; height: number }> = {};
+      for (const it of items) { const k = it.layers[0].key; if (out[k]) continue; const r = await rasterOfBytes(base.images[k]); if (r) out[k] = { width: r.width, height: r.height }; }
+      if (!cancelled) setBounds(out);
+    })();
+    return () => { cancelled = true; };
+  }, [base, items]);
+  const boxesWithBounds = useMemo(() => boxes.map((b) => {
+    const it = items.find((i) => i.id === b.id);
+    const k = it?.layers[0].key;
+    return k && bounds[k] ? { ...b, bounds: bounds[k] } : b;
+  }), [boxes, bounds, items]);
 
   const metadataFields = useMemo(() => (original ? paramsExtraFieldCount(original.paramsBytes) : 0), [original]);
   const siblingNames = useMemo(() => new Set(siblings.map((s) => s.name)), [siblings]);
 
-  if (!original || !activeFile) {
+  // Dev hook for scripted checks.
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "production") Object.assign(window, { __studio: { items, analysis, original, base, layerEdits, result } });
+  }, [items, analysis, original, base, layerEdits, result]);
+
+  if (!original || !activeFile || !base) {
     return (
       <div className="space-y-4">
         <Dropzone onFiles={(f) => load(f, false)} />
@@ -285,20 +406,30 @@ export default function Workspace() {
     );
   }
 
+  const stageMode = tab === "text" ? "text" : tab === "watermark" ? "watermark" : "none";
   return (
     <div className="space-y-3">
       {error && <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">{error}</div>}
+      {original.source && (original.source.container === "zip" || original.source.note) && (
+        <div className="rounded-xl border border-sky-500/25 bg-sky-500/10 px-3 py-2 text-[12px] text-sky-100/90">
+          {original.source.container === "zip" ? <>This is an SVGA {original.source.version} file. It opens here as usual and downloads as SVGA 2.x, which every current player reads.</> : <>Note: {original.source.note}.</>}
+        </div>
+      )}
 
-      <div className="grid gap-3 lg:grid-cols-[240px_minmax(0,1fr)_340px] items-start">
+      <div className="grid gap-3 lg:grid-cols-[220px_minmax(0,1fr)_380px] items-start">
         <FilesPanel files={files} active={activeFile} siblingNames={siblingNames} onPick={(f) => pick(f, files)} onAdd={(f) => load(f, true)} onClear={clear} disabled={building} />
 
         <Stage
-          movies={{ original, edited, result: result?.movie ?? null }}
+          movies={{ original, edited: anyEdit ? { movie: base, override: override ?? new Map() } : null, result: result?.movie ?? null }}
           view={view}
           onView={setView}
+          mode={stageMode}
           watermark={watermark}
           onWatermarkChange={setWatermark}
-          region={stageRegion}
+          overlay={{ boxes: boxesWithBounds, selectedId, onSelect: select, onRegionChange, selectMode, onSelectRect }}
+          highlight={tab === "layers" ? highlight : null}
+          seek={seek}
+          onFrame={(f) => { frameRef.current = f; }}
           fileName={activeFile.name}
           building={building}
         />
@@ -306,11 +437,18 @@ export default function Workspace() {
         <Inspector
           tab={tab}
           onTab={setTab}
-          active={{ text: textEdit.enabled && !!textEdit.text.trim(), watermark: watermark.enabled, compress: true }}
+          active={{ text: anyText, layers: hasLayerEdits(layerEdits), watermark: watermark.enabled, compress: true }}
           panels={{
             text: (
-              <TextEdit value={textEdit} onChange={setTextEdit} movie={original} siblings={siblings} otherFiles={files.length - 1} analysis={analysis} analyzing={analyzing} error={editError} disabled={building} onSeries={buildSeries} />
+              <div className="space-y-3">
+                <TextPanel movie={base} analysis={analysis} analyzing={analyzing} reading={reading} items={items} selectedId={selectedId} onSelect={select}
+                  onChange={updateItem} onForget={(id) => { setItems((p) => p.filter((x) => x.id !== id)); if (selectedId === id) setSelectedId(null); }}
+                  selectMode={selectMode} onSelectMode={setSelectMode} onImage={onImage} onDeleteLayer={onDeleteLayer} onSeries={buildSeries}
+                  siblings={siblings.length} disabled={building} />
+                {editError && <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-200 leading-relaxed">{editError}</div>}
+              </div>
             ),
+            layers: <LayersPanel movie={original} edits={layerEdits} onChange={setLayerEdits} onReplace={onReplaceLayer} onHover={onHoverLayer} disabled={building} />,
             compress: <Controls value={options} onChange={setOptions} disabled={building} metadataFields={metadataFields} bare />,
             watermark: <Watermark value={watermark} onChange={setWatermark} disabled={building} bare />,
           }}
@@ -327,4 +465,13 @@ export default function Workspace() {
       </div>
     </div>
   );
+}
+
+function saveBlob(blob: Blob, name: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }

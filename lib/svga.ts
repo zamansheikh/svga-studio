@@ -1,7 +1,9 @@
 "use client";
 
 import pako from "pako";
+import JSZip from "jszip";
 import { Reader, Writer } from "protobufjs/minimal";
+import { encodeAudioJson, encodeParams, encodeSpriteJson } from "./movie";
 
 /**
  * An SVGA 2.x file decomposed into the parts we actually touch.
@@ -31,30 +33,80 @@ export type MovieFile = {
   spriteBytes: Uint8Array[];
   /** Raw bytes of each AudioEntity — preserved untouched. */
   audioBytes: Uint8Array[];
+  /** How the file was stored — shown to the user; the download is always SVGA 2.x (zlib). */
+  source?: { container: "zlib" | "gzip" | "deflate" | "protobuf" | "zip"; version: string; note?: string };
 };
 
-/** Decode a .svga file (gzipped protobuf) into a MovieFile. */
+const isZip = (b: Uint8Array) => b.length >= 4 && b[0] === 0x50 && b[1] === 0x4b && b[2] === 0x03 && b[3] === 0x04;
+
+/**
+ * Inflate, keeping whatever a complete stream produced even when junk
+ * follows it (some uploaders append bytes; strict inflaters then throw the
+ * whole file away). Tries zlib, then gzip, then raw deflate.
+ */
+function inflateLenient(bytes: Uint8Array): { data: Uint8Array; container: "zlib" | "gzip" | "deflate"; trailing: boolean } | null {
+  // Inflate a raw deflate stream. In raw mode pako stops at the end of the
+  // stream; with a zlib/gzip wrapper it would try to read whatever follows
+  // as another stream and drop the last chunk of good data on the error.
+  const raw = (data: Uint8Array, trailer: number) => {
+    const chunks: Uint8Array[] = [];
+    const inf = new pako.Inflate({ raw: true });
+    inf.onData = (c: Uint8Array) => { chunks.push(c); };
+    try { inf.push(data, true); } catch { /* keep what was produced */ }
+    const total = chunks.reduce((n, c) => n + c.byteLength, 0);
+    if (!total) return null;
+    const out = new Uint8Array(total);
+    let o = 0;
+    for (const c of chunks) { out.set(c, o); o += c.byteLength; }
+    // Bytes left after the stream, beyond the wrapper's checksum trailer.
+    const left = (inf as unknown as { strm?: { avail_in?: number } }).strm?.avail_in ?? 0;
+    return { data: out, trailing: inf.err === 0 && left > trailer };
+  };
+  if (bytes[0] === 0x1f && bytes[1] === 0x8b && bytes[2] === 8) {
+    const start = gzipHeaderLength(bytes);
+    const r = start > 0 ? raw(bytes.subarray(start), 8) : null;
+    if (r) return { ...r, container: "gzip" };
+  }
+  if ((bytes[0] & 0x0f) === 8 && ((bytes[0] << 8) | bytes[1]) % 31 === 0 && !(bytes[1] & 0x20)) {
+    const r = raw(bytes.subarray(2), 4);
+    if (r) return { ...r, container: "zlib" };
+  }
+  const r = raw(bytes, 0);
+  return r ? { ...r, container: "deflate" } : null;
+}
+
+/** Length of a gzip member header (RFC 1952), or -1 when it is malformed. */
+function gzipHeaderLength(b: Uint8Array): number {
+  const flags = b[3];
+  let p = 10;
+  if (flags & 4) { if (p + 2 > b.length) return -1; p += 2 + (b[p] | (b[p + 1] << 8)); }
+  if (flags & 8) { while (p < b.length && b[p] !== 0) p++; p++; }
+  if (flags & 16) { while (p < b.length && b[p] !== 0) p++; p++; }
+  if (flags & 2) p += 2;
+  return p < b.length ? p : -1;
+}
+
+/** Decode any .svga — 2.x (zlib, gzip, raw deflate or bare protobuf) or 1.x (zip) — into a MovieFile. */
 export async function decodeSvga(bytes: Uint8Array): Promise<MovieFile> {
-  // SVGA 1.x is a ZIP archive — detect and reject with a clear message.
-  if (
-    bytes.length >= 4 &&
-    bytes[0] === 0x50 && bytes[1] === 0x4b && bytes[2] === 0x03 && bytes[3] === 0x04
-  ) {
-    throw new Error(
-      "This looks like an SVGA 1.x file (ZIP-based). Only SVGA 2.x is supported — " +
-        "please re-export from a newer version of your SVGA tooling.",
-    );
-  }
+  if (!bytes.length) throw new Error("The file is empty.");
+  if (isZip(bytes)) return decodeSvga1(bytes);
 
-  let inflated: Uint8Array;
-  try {
-    inflated = pako.inflate(bytes);
-  } catch {
-    throw new Error(
-      "Couldn't inflate this file — it doesn't look like a gzipped SVGA 2.x animation.",
-    );
+  const inflated = inflateLenient(bytes);
+  let movie: MovieFile | null = null;
+  if (inflated) {
+    try { movie = parseMovie(inflated.data); } catch { movie = null; }
+    if (movie) movie.source = { container: inflated.container, version: movie.version, note: inflated.trailing ? "extra bytes after the animation data were ignored" : undefined };
   }
+  if (!movie) {
+    // An uncompressed protobuf is still a valid movie to most players.
+    try { movie = parseMovie(bytes); movie.source = { container: "protobuf", version: movie.version }; } catch { movie = null; }
+  }
+  if (!movie) throw new Error("This doesn't look like an SVGA animation — it isn't SVGA 2.x (compressed protobuf) or 1.x (zip).");
+  return movie;
+}
 
+/** Read a MovieEntity protobuf. Throws when the bytes are not one. */
+function parseMovie(inflated: Uint8Array): MovieFile {
   const reader = Reader.create(inflated);
 
   let version = "";
@@ -93,13 +145,92 @@ export async function decodeSvga(bytes: Uint8Array): Promise<MovieFile> {
     );
   }
 
+  const params = parseParams(paramsBytes);
+  // Arbitrary bytes can parse as a few stray fields; a movie has a canvas and something to draw.
+  if (!(params.viewBoxWidth > 0 && params.viewBoxHeight > 0) || (!spriteBytes.length && !Object.keys(images).length)) {
+    throw new Error("No SVGA movie in these bytes.");
+  }
   return {
     version: version || "2.0.0",
     paramsBytes,
-    params: parseParams(paramsBytes),
+    params,
     images,
     spriteBytes,
     audioBytes,
+  };
+}
+
+/**
+ * SVGA 1.x: a zip with `movie.spec` (JSON) or `movie.binary` (protobuf)
+ * plus one file per image and sound. Converted to the 2.x structure, so the
+ * editor and the download treat it like any other file.
+ */
+async function decodeSvga1(bytes: Uint8Array): Promise<MovieFile> {
+  let zip: JSZip;
+  try {
+    zip = await JSZip.loadAsync(bytes);
+  } catch {
+    throw new Error("This SVGA 1.x file (zip) is damaged and can't be opened.");
+  }
+  const files = new Map<string, JSZip.JSZipObject>();
+  zip.forEach((path, entry) => { if (!entry.dir) files.set(path.replace(/^.*\//, ""), entry); });
+  const fileBytes = async (name: string) => {
+    const e = files.get(name) ?? files.get(`${name}.png`) ?? files.get(`${name}.mp3`);
+    return e ? new Uint8Array(await e.async("uint8array")) : null;
+  };
+
+  const binary = files.get("movie.binary");
+  if (binary) {
+    const movie = parseMovie(new Uint8Array(await binary.async("uint8array")));
+    // Image values are file names in 1.x binaries; resolve them to the files.
+    for (const [key, val] of Object.entries(movie.images)) {
+      if (sniffImageMime(val) !== "application/octet-stream" && val.byteLength > 64) continue;
+      const name = new TextDecoder().decode(val);
+      movie.images[key] = (await fileBytes(name)) ?? (await fileBytes(key)) ?? val;
+    }
+    movie.version = "2.0.0";
+    movie.source = { container: "zip", version: "1.x (binary)" };
+    return movie;
+  }
+
+  const specEntry = files.get("movie.spec");
+  if (!specEntry) throw new Error("This zip has no movie.spec or movie.binary, so it isn't an SVGA 1.x file.");
+  type Spec = {
+    ver?: string;
+    movie?: { viewBox?: { width?: number; height?: number }; fps?: number; frames?: number };
+    images?: Record<string, string>;
+    sprites?: Parameters<typeof encodeSpriteJson>[0][];
+    audios?: Parameters<typeof encodeAudioJson>[0][];
+  };
+  let spec: Spec;
+  try {
+    spec = JSON.parse(await specEntry.async("string"));
+  } catch {
+    throw new Error("The movie.spec inside this SVGA 1.x file isn't valid JSON.");
+  }
+  const params = {
+    viewBoxWidth: Number(spec.movie?.viewBox?.width) || 0,
+    viewBoxHeight: Number(spec.movie?.viewBox?.height) || 0,
+    fps: Number(spec.movie?.fps) || 20,
+    frames: Number(spec.movie?.frames) || 0,
+  };
+  const images: Record<string, Uint8Array> = {};
+  for (const [key, name] of Object.entries(spec.images ?? {})) {
+    const b = (await fileBytes(String(name))) ?? (await fileBytes(key));
+    if (b) images[key] = b;
+  }
+  for (const a of spec.audios ?? []) {
+    if (a.audioKey && !images[a.audioKey]) { const b = await fileBytes(a.audioKey); if (b) images[a.audioKey] = b; }
+  }
+  const paramsBytes = encodeParams(params);
+  return {
+    version: "2.0.0",
+    paramsBytes,
+    params,
+    images,
+    spriteBytes: (spec.sprites ?? []).map(encodeSpriteJson),
+    audioBytes: (spec.audios ?? []).map(encodeAudioJson),
+    source: { container: "zip", version: `1.x (${spec.ver ?? "spec"})` },
   };
 }
 
@@ -154,11 +285,14 @@ function parseParams(bytes: Uint8Array): MovieFile["params"] {
       const tag = r.uint32();
       const f = tag >>> 3;
       const wt = tag & 7;
-      if (f === 1 && wt === 5) out.viewBoxWidth = r.float();
-      else if (f === 2 && wt === 5) out.viewBoxHeight = r.float();
-      else if (f === 3 && wt === 5) out.fps = r.float();
-      else if (f === 4 && wt === 0) out.frames = r.int32();
-      else r.skipType(wt);
+      // The spec says fps and frames are int32 (varints) and the canvas size
+      // floats; exporters disagree, so accept either encoding for each.
+      const v = wt === 5 ? r.float() : wt === 0 ? r.int32() : (r.skipType(wt), null);
+      if (v == null) continue;
+      if (f === 1) out.viewBoxWidth = v;
+      else if (f === 2) out.viewBoxHeight = v;
+      else if (f === 3) out.fps = v;
+      else if (f === 4) out.frames = Math.round(v);
     }
   } catch {
     /* tolerate partial params */

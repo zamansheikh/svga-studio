@@ -37,12 +37,12 @@ export default function Home() {
             Edit and shrink <span className="gradient-text">.svga</span> animations, in your browser.
           </h1>
           <p className="mt-3 max-w-2xl text-sm sm:text-base text-white/60">
-            Drop a file, change the text painted into it, tune compression, download. Nothing is
-            uploaded anywhere.
+            Drop any .svga — every text in it is found and listed. Retype a name, a level, a rank in
+            the original look, swap pictures, compress, download. Nothing is uploaded anywhere.
           </p>
           <ol className="mt-4 flex flex-wrap gap-x-6 gap-y-1 text-xs text-white/50">
             <li><span className="text-white/80 font-medium">1</span> Drop a file — or the whole set</li>
-            <li><span className="text-white/80 font-medium">2</span> Type the new text, drag the box if needed</li>
+            <li><span className="text-white/80 font-medium">2</span> Type over any text in the list, or draw a box around one</li>
             <li><span className="text-white/80 font-medium">3</span> Build, check the Result view, download</li>
           </ol>
         </section>
@@ -61,7 +61,7 @@ export default function Home() {
           />
           <Feature
             title="Preview before & after"
-            body="A lightweight WebGL-free canvas renderer plays your animation at native fps."
+            body="Bitmaps, vector shapes, masks and sound, at the file's own frame rate — SVGA 1.x and 2.x."
             icon={<path d="M8 5v14l11-7z" />}
           />
           <Feature
@@ -90,12 +90,19 @@ export default function Home() {
             If your player is SVGAPlayer 2.x on Android / iOS / Web, WebP embeds are supported.
             If you target older players, choose PNG to stay fully lossless and compatible.
           </Faq>
-          <Faq q="How does replacing text work?">
-            The tool finds where the text lives by diffing the file against its siblings — other
-            files from the same set with different text. If the text is its own bitmap it is
-            re-rendered and swapped; if it is painted into a larger bitmap, the background is
-            painted back over it first and the new text drawn on top. The original colour is
-            sampled unless you choose a look.
+          <Faq q="How does editing text work?">
+            Every layer of the file is searched for lettering, and what is found is read with OCR
+            and listed: empty name slots your app fills at runtime, letters on their own layer
+            (with their shadow and highlight copies), letters painted into the artwork — even into
+            every frame of an image sequence — and hidden text such as a seller&apos;s watermark.
+            Type over one and only its letters are erased; the new text is drawn in the measured
+            look (height, slant, weight, gradient, outline) and the closest font, which you can
+            change. Anything not listed: draw a box around it on the stage.
+          </Faq>
+          <Faq q="Which SVGA files open?">
+            All of them: SVGA 2.x compressed with zlib or gzip, raw deflate or not at all (even with
+            junk bytes after the data), and SVGA 1.x zip files with movie.spec or movie.binary. 1.x
+            files download as 2.x, which every current player reads.
           </Faq>
           <Faq q="Is SVG supported?">
             No — this tool is specifically for SVGA (animation). For static SVG files, use a
@@ -106,7 +113,7 @@ export default function Home() {
         {/* Footer */}
         <footer className="mt-16 border-t border-white/5 pt-6 text-xs text-white/40 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
           <div>
-            Built with Next.js 15, React 19, Tailwind. Deploy to{" "}
+            Built with Next.js 16, React 19, Tailwind. Deploy to{" "}
             <Link href="https://vercel.com" className="underline hover:text-white/70">
               Vercel
             </Link>{" "}

@@ -4,13 +4,16 @@
   "private": true,
   "description": "Modern in-browser SVGA animation compressor and editor — upload, preview, replace text, compress, download.",
   "scripts": {
+    "predev": "node scripts/copy-ocr.mjs",
     "dev": "next dev",
+    "prebuild": "node scripts/copy-ocr.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@tesseract.js-data/eng": "^1.0.0",
     "clsx": "2.1.1",
     "framer-motion": "11.15.0",
     "jszip": "^3.10.1",
@@ -19,6 +22,7 @@
     "protobufjs": "7.5.5",
     "react": "19.2.5",
     "react-dom": "19.2.5",
+    "tesseract.js": "^5.1.1",
     "upng-js": "2.1.0"
   },
   "devDependencies": {
