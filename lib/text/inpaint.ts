@@ -270,6 +270,45 @@ export function inpaint(r: Raster, m: Mask, opts: { margin?: number; iterations?
   }
 }
 
+/** The same mask on a bigger frame (pixels outside the old frame start empty). */
+export function expandMask(m: Mask, frame: Rect): Mask {
+  const out: Mask = { data: new Uint8Array(frame.width * frame.height), width: frame.width, height: frame.height, x: frame.x, y: frame.y };
+  orMask(out, m);
+  return out;
+}
+
+/**
+ * Grow a text mask to the effects around the letters — drop shadow,
+ * outline, glow, the dot of an i — by comparing the image with an estimate
+ * of what it looks like without the letters (the letters filled in from
+ * their surroundings). Near the letters, whatever differs from that local
+ * estimate belongs to the text. Unlike a colour test against the box's
+ * border, this works when the border runs through gilt edges and dark
+ * shading that look like the text's own colours.
+ */
+export function refineFootprint(r: Raster, base: Mask, zoneRadius: number, threshold = 70): Mask {
+  if (!maskCount(base)) return base;
+  // Estimate the background from a little beyond the letters — past a
+  // typical drop shadow, short of the plate's border — so the shadow
+  // doesn't count as background itself.
+  const zone = dilateMask(base, zoneRadius);
+  const est = { data: new Uint8ClampedArray(r.data), width: r.width, height: r.height };
+  inpaint(est, dilateMask(base, Math.max(1, Math.round(zoneRadius * 0.4))));
+  const out: Mask = { ...base, data: new Uint8Array(base.data) };
+  for (let y = 0; y < out.height; y++) for (let x = 0; x < out.width; x++) {
+    const i = y * out.width + x;
+    if (out.data[i] || !zone.data[i]) continue;
+    const gx = x + out.x, gy = y + out.y;
+    if (gx < 0 || gy < 0 || gx >= r.width || gy >= r.height) continue;
+    const o = (gy * r.width + gx) * 4;
+    const a = pm(r.data, o), b = pm(est.data, o);
+    const d = Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]) + Math.abs(a[3] - b[3]) * 0.75;
+    if (d > threshold) out.data[i] = 1;
+  }
+  despeckle(out, 3);
+  return dilateMask(out, 1);
+}
+
 /** Clear the masked pixels to transparent (text on its own layer). */
 export function clearMask(r: Raster, m: Mask) {
   for (let y = 0; y < m.height; y++) for (let x = 0; x < m.width; x++) {

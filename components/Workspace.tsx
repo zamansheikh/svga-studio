@@ -271,16 +271,27 @@ export default function Workspace({ incoming = null, onMakeIcons, active = true 
     setSelectedId(null);
   }, []);
 
-  // Escape: stop drawing a box, then deselect.
+  // Escape: stop drawing a box, then deselect. Delete / Backspace: remove (or restore) the selected text.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      if (selectMode) setSelectMode(false);
-      else setSelectedId(null);
+      if (!active) return;
+      if (e.key === "Escape") {
+        if (selectMode) setSelectMode(false);
+        else setSelectedId(null);
+        return;
+      }
+      if ((e.key === "Delete" || e.key === "Backspace") && selectedId) {
+        const tag = (e.target as HTMLElement)?.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || (e.target as HTMLElement)?.isContentEditable) return;
+        const it = items.find((i) => i.id === selectedId);
+        if (!it || !(it.kind === "layer" || it.kind === "painted" || it.kind === "hidden")) return;
+        e.preventDefault();
+        updateItem({ ...it, remove: !it.remove, text: "" });
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selectMode]);
+  }, [selectMode, selectedId, items, active, updateItem]);
 
   /* ---------------- layer highlight ---------------- */
 
@@ -365,9 +376,10 @@ export default function Workspace({ incoming = null, onMakeIcons, active = true 
     if (!activeFile) return null;
     const stem = activeFile.name.replace(/\.svga$/i, "");
     const first = items.find((i) => isEdited(i) && i.text.trim());
-    const tag = first ? `-${first.text.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "edited"}` : anyEdit ? "-edited" : ".min";
+    const onlyRemoved = !first && items.some((i) => i.remove) && !hasLayerEdits(layerEdits);
+    const tag = first ? `-${first.text.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "edited"}` : onlyRemoved ? "-no-text" : anyEdit ? "-edited" : ".min";
     return `${stem}${tag}.svga`;
-  }, [activeFile, items, anyEdit]);
+  }, [activeFile, items, anyEdit, layerEdits]);
 
   const download = useCallback(() => {
     if (!result || !downloadName) return;
@@ -469,6 +481,7 @@ export default function Workspace({ incoming = null, onMakeIcons, active = true 
                 <TextPanel movie={base} analysis={analysis} analyzing={analyzing} reading={reading} items={items} selectedId={selectedId} onSelect={select}
                   onChange={updateItem} onForget={(id) => { setItems((p) => p.filter((x) => x.id !== id)); if (selectedId === id) setSelectedId(null); }}
                   selectMode={selectMode} onSelectMode={setSelectMode} onImage={onImage} onDeleteLayer={onDeleteLayer} onSeries={buildSeries}
+                  onRemoveMany={(ids, remove) => { touched.current = true; setItems((prev) => prev.map((p) => (ids.includes(p.id) ? { ...p, remove, text: "" } : p))); }}
                   siblings={siblings.length} disabled={building} />
                 {editError && <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-200 leading-relaxed">{editError}</div>}
               </div>

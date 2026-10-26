@@ -23,9 +23,14 @@ type Props = {
   onImage: (it: TextItem, file: File, circle: boolean) => void;
   onDeleteLayer: (it: TextItem) => void;
   onSeries: (values: string[]) => void;
+  /** Remove (true) or restore (false) these items' text in one go. */
+  onRemoveMany: (ids: string[], remove: boolean) => void;
   siblings: number;
   disabled?: boolean;
 };
+
+/** Texts that are drawn into the artwork, so erasing them changes something (slots are already empty). */
+export const canRemove = (it: TextItem) => it.kind === "layer" || it.kind === "painted" || it.kind === "hidden";
 
 /** "1-20, 25" → ["1", …, "20", "25"]; plain words pass through. */
 export function parseSeries(spec: string): string[] {
@@ -56,6 +61,8 @@ export default function TextPanel(p: Props) {
   const weak = items.filter((i) => !strong.includes(i));
   const [showWeak, setShowWeak] = useState(false);
   const selected = items.find((i) => i.id === selectedId) ?? null;
+  const removable = strong.filter(canRemove);
+  const removedCount = removable.filter((i) => i.remove).length;
 
   return (
     <div className="space-y-4">
@@ -76,6 +83,17 @@ export default function TextPanel(p: Props) {
             : <>No text found automatically. Draw a box around the text on the stage{p.siblings ? "" : ", or add the other files of this set (level-1 … level-50) so the difference shows where it is"}.</>}
         {analysis?.glyphsNote && <div className="mt-1 text-emerald-300/80">Lettering: {analysis.glyphsNote}.</div>}
       </div>
+
+      {removable.length > 0 && (
+        <div className="flex items-center justify-between gap-2 rounded-lg bg-white/[0.03] px-2.5 py-1.5">
+          <span className="text-[11px] text-white/50">
+            {removedCount ? `${removedCount} of ${removable.length} ${removable.length === 1 ? "text" : "texts"} removed` : "Want a blank version?"}
+          </span>
+          {removedCount < removable.length
+            ? <Button tone="danger" onClick={() => p.onRemoveMany(removable.map((i) => i.id), true)} disabled={p.disabled} title="Erase every text listed above and fill in the background">Remove all text</Button>
+            : <Button onClick={() => p.onRemoveMany(removable.map((i) => i.id), false)} disabled={p.disabled}>Restore all</Button>}
+        </div>
+      )}
 
       <ul className="space-y-1.5">
         {strong.map((it, i) => <ItemRow key={it.id} it={it} index={i} {...p} />)}
@@ -117,7 +135,7 @@ function ItemRow({ it, index, selectedId, onSelect, onChange, onForget, movie, d
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-1.5">
               <span className="truncate text-sm text-white">{itemTitle(it, index)}</span>
-              {isEdited(it) && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-fuchsia-400" title="edited" />}
+              {it.remove ? <Badge tone="bad">removed</Badge> : isEdited(it) && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-fuchsia-400" title="edited" />}
             </div>
             <div className="mt-0.5 flex flex-wrap items-center gap-1">
               <Badge tone={kind.tone} title={kind.hint}>{kind.label}</Badge>
@@ -129,13 +147,30 @@ function ItemRow({ it, index, selectedId, onSelect, onChange, onForget, movie, d
             </div>
           </div>
         </button>
-        {it.kind !== "image-slot" && it.kind !== "hidden" && (
+        {it.kind !== "image-slot" && (it.kind !== "hidden" || it.remove) && (
           <div className="px-2 pb-2 -mt-0.5 flex items-center gap-1.5">
-            <input type="text" value={it.text} placeholder={it.original && it.verified ? `Replace “${it.original}”` : it.kind === "slot" ? "Text to bake in" : "New text"} disabled={disabled || it.remove}
-              onFocus={() => !sel && onSelect(it.id)} onChange={(e) => onChange({ ...it, text: e.target.value })} maxLength={80} autoComplete="off" spellCheck={false}
-              className="min-w-0 flex-1 rounded-lg bg-black/25 border border-white/10 px-2.5 py-1.5 text-sm text-white placeholder-white/30 focus:outline-none focus:ring-2 focus:ring-brand-500/40 disabled:opacity-50" />
+            {it.kind === "hidden" ? (
+              <span className="min-w-0 flex-1 text-[11px] text-white/50">Text erased</span>
+            ) : (
+              <input type="text" value={it.text} disabled={disabled}
+                placeholder={it.remove ? "Removed — type to write new text" : it.original && it.verified ? `Replace “${it.original}”` : it.kind === "slot" ? "Text to bake in" : "New text"}
+                onFocus={() => !sel && onSelect(it.id)} onChange={(e) => onChange({ ...it, text: e.target.value, remove: false })} maxLength={80} autoComplete="off" spellCheck={false}
+                className={`min-w-0 flex-1 rounded-lg border px-2.5 py-1.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-brand-500/40 disabled:opacity-50 ${it.remove ? "border-red-400/30 bg-red-500/[0.06] placeholder-red-200/50" : "border-white/10 bg-black/25 placeholder-white/30"}`} />
+            )}
+            {canRemove(it) && (
+              <button type="button" disabled={disabled} onClick={() => onChange({ ...it, remove: !it.remove, text: "" })}
+                title={it.remove ? "Bring the original text back" : "Remove this text: erase it and fill in the background (Delete)"}
+                className={`flex h-8 shrink-0 items-center gap-1 rounded-lg px-2 text-[11px] font-medium transition disabled:opacity-40 ${it.remove ? "bg-white/10 text-white hover:bg-white/15" : "bg-red-500/10 text-red-200 hover:bg-red-500/20"}`}>
+                <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 fill-current" aria-hidden>
+                  {it.remove
+                    ? <path d="M12.5 8c-2.65 0-5.05 1-6.9 2.6L2 7v9h9l-3.62-3.62A7.95 7.95 0 0 1 12.5 10c3.54 0 6.55 2.31 7.6 5.5l2.37-.78A10.02 10.02 0 0 0 12.5 8z" />
+                    : <path d="M16.24 3.56 21.19 8.5a2 2 0 0 1 0 2.83L12 20.53H20v2H8.5L2.81 16.85a2 2 0 0 1 0-2.83L13.41 3.56a2 2 0 0 1 2.83 0zM4.22 15.43l4.2 4.21h2.76l2.12-2.12-4.95-4.95-4.13 4.13z" />}
+                </svg>
+                {it.remove ? "Undo" : "Remove"}
+              </button>
+            )}
             {it.source === "manual" && (
-              <button type="button" onClick={() => onForget(it.id)} title="Forget this selection" className="h-7 w-7 shrink-0 rounded-lg text-white/40 hover:text-white hover:bg-white/10">×</button>
+              <button type="button" onClick={() => onForget(it.id)} title="Forget this selection" className="h-8 w-7 shrink-0 rounded-lg text-white/40 hover:text-white hover:bg-white/10">×</button>
             )}
           </div>
         )}
@@ -243,10 +278,25 @@ function ItemEditor({ it, onChange, onImage, onDeleteLayer, analysis, disabled }
     );
   }
 
+  const removable = canRemove(it);
+  if (it.remove) {
+    return (
+      <div className="rounded-xl border border-red-500/20 bg-red-500/[0.06] p-3 space-y-3">
+        {removable && <ModeSwitch it={it} onChange={onChange} disabled={disabled} />}
+        <p className="text-[11px] leading-relaxed text-white/60">
+          The letters are erased and the background behind them is filled in from the surrounding artwork
+          {it.layers.length > 1 ? `, on all ${it.layers.length} layers (shadow and highlight copies too)` : ""}
+          {it.layers[0].keys.length > 1 ? `, in every one of the ${it.layers[0].keys.length} frames` : ""}.
+          Check the <span className="text-white/80">Edited</span> view; drag or resize the box on the stage if a piece is left over.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="rounded-xl bg-white/[0.04] border border-white/10 p-3 space-y-4">
-      <div className="flex items-center justify-between gap-2">
-        <Checkbox label="Remove the text (write nothing)" checked={it.remove} onChange={(b) => onChange({ ...it, remove: b })} disabled={disabled} />
+      {removable && <ModeSwitch it={it} onChange={onChange} disabled={disabled} />}
+      <div className="flex items-center justify-end gap-2">
         <button type="button" onClick={() => onChange({ ...it, style: { ...it.matched }, offset: { x: 0, y: 0 } })} disabled={disabled} className="text-[11px] text-brand-300 hover:text-brand-200 disabled:opacity-40" title="Back to the look measured from the original lettering">
           Reset look
         </button>
@@ -371,6 +421,18 @@ function ItemEditor({ it, onChange, onImage, onDeleteLayer, analysis, disabled }
         )}
       </div>
     </div>
+  );
+}
+
+/** Write new text here, or remove the text and leave the artwork clean. */
+function ModeSwitch({ it, onChange, disabled }: { it: TextItem; onChange: (it: TextItem) => void; disabled?: boolean }) {
+  return (
+    <Segmented label="What to do with this text" value={it.remove ? "remove" : "replace"} disabled={disabled}
+      onChange={(v) => onChange({ ...it, remove: v === "remove", text: v === "remove" ? "" : it.text })}
+      options={[
+        { value: "replace", label: "Replace text", title: "Write new text in its place" },
+        { value: "remove", label: "Remove text", title: "Erase it and fill in the background" },
+      ]} />
   );
 }
 

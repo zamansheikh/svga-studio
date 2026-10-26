@@ -91,6 +91,14 @@ the original and what it reads. Type into one to replace it; the stage shows
 the result live. Text that isn't listed: press **Select text on the stage** and
 drag a box around it.
 
+**Removing text.** Every text has a **Remove** button (or select it and press
+Delete): the letters are erased — with their shadow, outline and glow, on every
+copy layer and in every frame of a sequence — and the background behind them is
+filled in from the surrounding artwork. **Remove all text** makes a blank
+version of the whole file (downloaded as `name-no-text.svga`). Undo brings the
+original text back; typing into a removed text writes new text instead. Text on
+its own transparent layer is simply cleared.
+
 What counts as text, and how each kind is edited:
 
 | Kind | What it is | Edit |

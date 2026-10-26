@@ -83,7 +83,7 @@ export default function Studio() {
 }
 
 const KEYS: Record<Mode, [string, string][]> = {
-  edit: [["1 2 3", "Original / Edited / Result"], ["Space", "Play / pause"], [", .", "Previous / next frame"], ["Esc", "Stop drawing a box, deselect"]],
+  edit: [["1 2 3", "Original / Edited / Result"], ["Space", "Play / pause"], [", .", "Previous / next frame"], ["Delete", "Remove / restore the selected text"], ["Esc", "Stop drawing a box, deselect"]],
   icons: [["Drop", "Files or folders anywhere on the grid"], ["↻", "Pick one file's frame"]],
 };
 

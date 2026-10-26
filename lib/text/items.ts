@@ -6,11 +6,11 @@ import type { Transform } from "../movie";
 import { MIN_ALPHA, resolveImageKey, spritesOf } from "../renderer";
 import { buildGlyphLibrary, textFromName, type GlyphLibrary, type GlyphSample } from "../glyphs";
 import { findTextLines, type TextLine } from "./detect";
-import { alphaMask, clearMask, inpaint, maskCount, maskPalette, orMask, paletteMatch, textFootprint, type Mask } from "./inpaint";
+import { alphaMask, clearMask, dilateMask, expandMask, inpaint, maskCount, maskPalette, orMask, paletteMatch, refineFootprint, textFootprint, type Mask } from "./inpaint";
 import { readMask } from "./ocr";
 import { matchFont } from "./fontmatch";
 import {
-  alphaBounds, canvasToRaster, clampRect, cloneRaster, get2dCtx, inkShare, iou, makeCanvas, padRect, rasterOfBytes, rasterToCanvas, rasterToPng,
+  alphaBounds, canvasToRaster, clampRect, cloneRaster, coverage, get2dCtx, inkShare, iou, makeCanvas, padRect, rasterOfBytes, rasterToCanvas, rasterToPng,
   type Raster, type Rect,
 } from "./raster";
 import { companionStyle, DEFAULT_STYLE, drawText, measureLettering, styleFromMeasured, type Anchor, type Measured, type TextStyle } from "./style";
@@ -337,15 +337,21 @@ export function growLine(r: Raster, line: TextLine): TextLine {
  */
 function ownLayer(r: Raster, line: TextLine): boolean {
   const ink = alphaBounds(r, 16);
-  if (!ink || iou(padRect(line.box, line.height * 0.4), ink) < 0.5) return false;
-  const m = lineMask(line);
-  let n = 0, clear = 0;
-  for (let y = 0; y < m.height; y++) for (let x = 0; x < m.width; x++) {
-    if (m.data[y * m.width + x]) continue;
-    n++;
-    if (r.data[((y + m.y) * r.width + x + m.x) * 4 + 3] < 40) clear++;
+  if (!ink) return false;
+  // Nothing of the bitmap lies away from the text…
+  if (coverage(ink, padRect(line.box, line.height * 0.8, line.height * 0.6)) < 0.9) return false;
+  // …and what surrounds the letters is their own glow, outline or shadow
+  // (it fades with distance), not a plate (opaque all the way across).
+  const letters = lineMask(line);
+  const near = dilateMask(letters, Math.max(2, Math.round(line.height * 0.3)));
+  let far = 0, farOpaque = 0;
+  for (let y = ink.y; y < ink.y + ink.height; y++) for (let x = ink.x; x < ink.x + ink.width; x++) {
+    const nx = x - near.x, ny = y - near.y;
+    if (nx >= 0 && ny >= 0 && nx < near.width && ny < near.height && near.data[ny * near.width + nx]) continue;
+    far++;
+    if (r.data[(y * r.width + x) * 4 + 3] > 128) farOpaque++;
   }
-  return n > 0 && clear / n >= 0.4;
+  return !far || farOpaque / far < 0.35;
 }
 
 let idSeq = 0;
@@ -583,8 +589,10 @@ export async function readItems(items: TextItem[], onRead: (it: TextItem) => voi
     const f = it.layers[0].fill!;
     const res = await readMask(f);
     if (!res) return; // OCR unavailable
-    it.verified = res.verified;
-    if (res.verified) {
+    // A reading confirms text only where the detector saw letters to begin
+    // with: OCR finds "4 4" in a sparkle too.
+    it.verified = res.verified && (it.score >= 45 || it.source !== "detected");
+    if (it.verified) {
       it.original = res.text;
       it.score = Math.round(it.score * 2.5);
       it.confident = true;
@@ -602,11 +610,13 @@ export async function readItems(items: TextItem[], onRead: (it: TextItem) => voi
       // effects, so a strong detection keeps its standing; a weak one,
       // probably an ornament, drops down the list.
       if (res.text && res.confidence >= 50) it.original = res.text;
-      const strong = it.score >= 300 || (it.kind === "hidden" && it.score >= 150) || (it.kind === "layer" && it.score >= 150);
+      // Ornaments on their own layer score well too (a gift box, a gem), so
+      // only a very strong detection stands without a reading.
+      const strong = it.score >= 400 || (it.kind === "hidden" && it.score >= 150);
       if (!strong) {
         it.score = Math.round(it.score * (res.confidence < 35 ? 0.4 : 0.7));
         it.confident = false;
-      } else if (it.kind === "hidden" || it.score >= 300) it.confident = true;
+      } else it.confident = true;
     }
     onRead(it);
   }
@@ -729,10 +739,34 @@ function unionRegion(a: Rect, b: Rect): Rect {
 type Op = { it: TextItem; layer: ItemLayer };
 
 /** Where text effects can reach: within about a quarter letter-height of the known letters. */
-function nearZone(layer: ItemLayer): { mask: Mask; radius: number } | null {
-  if (!layer.fill || !maskCount(layer.fill)) return null;
+function nearZone(layer: ItemLayer, letters: Mask | null = layer.fill): { mask: Mask; radius: number } | null {
+  if (!letters || !maskCount(letters)) return null;
   const h = layer.glyphs.length ? Math.max(...layer.glyphs.map((g) => g.height)) : layer.region.height * 0.6;
-  return { mask: layer.fill, radius: Math.max(2, Math.ceil(h * 0.22)) };
+  return { mask: letters, radius: Math.max(2, Math.ceil(h * 0.22)) };
+}
+
+/** Both masks on one frame. */
+function unionMasks(a: Mask, b: Mask): Mask {
+  const x0 = Math.min(a.x, b.x), y0 = Math.min(a.y, b.y);
+  const x1 = Math.max(a.x + a.width, b.x + b.width), y1 = Math.max(a.y + a.height, b.y + b.height);
+  const out = expandMask(a, { x: x0, y: y0, width: x1 - x0, height: y1 - y0 });
+  orMask(out, b);
+  return out;
+}
+
+/** A mask in one bitmap's pixels, carried onto another bitmap through the canvas (both drawn at their transforms). */
+function mapMask(m: Mask, from: Transform, to: Transform, w: number, h: number): Mask | null {
+  const invFrom = invert(from), invTo = invert(to);
+  if (!invFrom || !invTo) return null;
+  const frame = clampRect(mapRect(invTo, mapRect(from, { x: m.x, y: m.y, width: m.width, height: m.height })), w, h);
+  if (frame.width < 1 || frame.height < 1) return null;
+  const out: Mask = { data: new Uint8Array(frame.width * frame.height), width: frame.width, height: frame.height, x: frame.x, y: frame.y };
+  for (let y = 0; y < frame.height; y++) for (let x = 0; x < frame.width; x++) {
+    const p = apply(invFrom, apply(to, { x: x + frame.x + 0.5, y: y + frame.y + 0.5 }));
+    const sx = Math.floor(p.x) - m.x, sy = Math.floor(p.y) - m.y;
+    if (sx >= 0 && sy >= 0 && sx < m.width && sy < m.height && m.data[sy * m.width + sx]) out.data[y * frame.width + x] = 1;
+  }
+  return out;
 }
 type Erased = { raster: Raster; presence: Map<ItemLayer, number> };
 
@@ -763,14 +797,37 @@ export async function editRasters(movie: MovieFile, items: TextItem[], glyphs: G
   if (!cache) eraseCache.set(movie, (cache = new Map()));
   // Per layer: the reference frame's footprint and the text colours.
   const refs = new Map<ItemLayer, { foot: Mask | null; palette: number[][]; presence: number }>();
-  const refOf = async (layer: ItemLayer) => {
+  const refOf = async (it: TextItem, layer: ItemLayer) => {
     let r = refs.get(layer);
     if (!r) {
       const reference = await rasterOfBytes(movie.images[layer.key]);
       const palette = reference && layer.fill ? maskPalette(reference, layer.fill) : [];
-      const near = nearZone(layer);
+      // A copy of the text (shadow, highlight, a plate with the letters
+      // baked in) carries the same letters in the same place: where the
+      // main layer's letters land on it counts as letters too.
+      const main = it.layers[0];
+      let letters = layer.fill;
+      if (layer !== main && main.fill && reference) {
+        const mapped = mapMask(main.fill, main.transform, layer.transform, reference.width, reference.height);
+        if (mapped && maskCount(mapped)) letters = letters ? unionMasks(letters, mapped) : mapped;
+      }
+      const near = nearZone(layer, letters);
+      // A thin band around the letters always goes, then the mask grows to
+      // whatever near the letters differs from the background behind them
+      // (drop shadow, outline, glow). The work area reaches a little past
+      // the region so a shadow at its edge is caught too.
+      const hint = letters && near ? dilateMask(letters, Math.max(1, Math.round(near.radius * 0.5))) : letters;
+      let foot: Mask | null = null;
+      if (reference && layer.erase === "inpaint") {
+        const reach = near ? Math.ceil(near.radius * 1.4) : 0;
+        const area = letters ? unionRegion(layer.region, { x: letters.x, y: letters.y, width: letters.width, height: letters.height }) : layer.region;
+        const frame = clampRect(padRect(area, reach), reference.width, reference.height);
+        foot = expandMask(textFootprint(reference, clampRect(area, reference.width, reference.height), { hint, near }), frame);
+        // Effects hug the letters; growing further would reach the plate's border.
+        if (near) foot = refineFootprint(reference, foot, near.radius);
+      }
       r = {
-        foot: reference && layer.erase === "inpaint" ? textFootprint(reference, layer.region, { hint: layer.fill, near }) : null,
+        foot,
         palette,
         presence: reference && layer.fill && layer.keys.length > 1 ? paletteMatch(reference, layer.fill, palette) : 1,
       };
@@ -787,16 +844,16 @@ export async function editRasters(movie: MovieFile, items: TextItem[], glyphs: G
       if (!src) continue;
       const r = cloneRaster(src);
       const presence = new Map<ItemLayer, number>();
-      for (const { layer } of list) {
+      for (const { it, layer } of list) {
         if (layer.erase === "clear") {
           clearMask(r, alphaMask(r, layer.region, 0));
         } else if (layer.erase === "inpaint") {
-          const ref = await refOf(layer);
+          const ref = await refOf(it, layer);
           let fp: Mask;
           if (k === layer.key && ref.foot) fp = ref.foot;
           else {
             fp = textFootprint(r, layer.region, { textColors: ref.palette, near: nearZone(layer) });
-            if (ref.foot) orMask(fp, ref.foot);
+            if (ref.foot) { fp = expandMask(fp, ref.foot); orMask(fp, ref.foot); }
           }
           // Frames where the text fades in or out carry less of it: the new
           // text is drawn as faintly as the old one was.
