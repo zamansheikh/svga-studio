@@ -38,7 +38,8 @@ export default function Home() {
           </h1>
           <p className="mt-3 max-w-2xl text-sm sm:text-base text-white/60">
             Drop any .svga — every text in it is found and listed. Retype a name, a level, a rank in
-            the original look, swap pictures, compress, download. Nothing is uploaded anywhere.
+            the original look, swap pictures, compress, download. Or drop a whole folder and get an
+            icon of every animation in one zip. Nothing is uploaded anywhere.
           </p>
           <ol className="mt-4 flex flex-wrap gap-x-6 gap-y-1 text-xs text-white/50">
             <li><span className="text-white/80 font-medium">1</span> Drop a file — or the whole set</li>
@@ -51,7 +52,7 @@ export default function Home() {
         <Compressor />
 
         {/* Feature strip */}
-        <section className="mt-16 grid gap-4 sm:grid-cols-3">
+        <section className="mt-16 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <Feature
             title="Private by default"
             body="Files never leave your browser. No backend, no tracking."
@@ -63,6 +64,11 @@ export default function Home() {
             title="Preview before & after"
             body="Bitmaps, vector shapes, masks and sound, at the file's own frame rate — SVGA 1.x and 2.x."
             icon={<path d="M8 5v14l11-7z" />}
+          />
+          <Feature
+            title="Batch icons"
+            body="Drop hundreds of files or whole folders; get a still of each — best frame picked for you — as one zip."
+            icon={<path d="M4 4h7v7H4V4zm9 0h7v7h-7V4zM4 13h7v7H4v-7zm9 0h7v7h-7v-7z" />}
           />
           <Feature
             title="Mobile friendly"
@@ -98,6 +104,12 @@ export default function Home() {
             Type over one and only its letters are erased; the new text is drawn in the measured
             look (height, slant, weight, gradient, outline) and the closest font, which you can
             change. Anything not listed: draw a box around it on the stage.
+          </Faq>
+          <Faq q="How do I make icons for many files?">
+            Switch to Batch icons and drop the files, or whole folders. Each animation is rendered at
+            its most detailed frame (or the start, middle or end, or a frame you pick per file),
+            trimmed and sized to your settings — PNG, WebP or JPEG — and everything downloads as one
+            zip that keeps your folders.
           </Faq>
           <Faq q="Which SVGA files open?">
             All of them: SVGA 2.x compressed with zlib or gzip, raw deflate or not at all (even with

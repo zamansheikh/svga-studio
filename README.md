@@ -23,6 +23,8 @@ Built with Next.js 16, React 19, TypeScript, Tailwind. Deploys to Vercel in one 
 - Quality, scale and output format (WebP / PNG / JPEG) controls; edited bitmaps are
   stored the way the originals were (palette PNG stays palette PNG)
 - Series: one file per value (`1-20`, `Gold, Silver`) for any text, zipped
+- **Batch icons**: drop many files or whole folders, get a still image of each, download
+  them as one zip — see [Batch icons](#batch-icons)
 - Nothing leaves your browser — decode, edit, re-encode and compress happen on-device
 
 ## Tech
@@ -112,6 +114,28 @@ shapes are closest. Everything can be changed: font (or upload one), weight,
 italic and slant, letter height, squeeze/shrink to fit, alignment, spacing,
 colours and gradient stops, outline, shadow, position. The box on the stage
 can be dragged and resized; the text follows it.
+
+## Batch icons
+
+Switch to **Batch icons** at the top (or open `/#icons`, or press *Make icons for
+all N* in the editor's file list). Drop `.svga` files or whole folders — folders
+are searched inside — and a still image of every animation appears in a grid.
+
+- **Frame**: *Best* picks the most detailed frame, scored the way the gift
+  library's `make_previews.py` does (visible pixels weighted by edge detail, so a
+  white flash never wins; earlier frame on near-ties). Or *Start* / *Middle* /
+  *End*. Any single file can use its own frame: ↻ on its card opens a scrubber.
+- **Presets**: *App icon* (256² trimmed PNG), *Full preview* (the animation's own
+  canvas size, untrimmed — the same as the library's `.png` previews),
+  *Thumbnail* (128² WebP), *Store tile* (512² on a rounded colour tile); then size,
+  square or artwork-shaped, trim, padding, background and corner radius, PNG /
+  WebP / JPEG and quality.
+- **Download**: the selected icons as one zip, named from a template (`{name}`,
+  `{n}`, `{size}`, `{frame}`), keeping the dropped folders, optionally with each
+  `.svga` next to its icon. Or one icon from its card.
+
+Files are decoded one at a time and released, so large batches stay light: 280
+files of the library render in about 16 s with the page under 150 MB.
 
 ## How compression works
 

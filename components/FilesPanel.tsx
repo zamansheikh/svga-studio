@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import type { MovieFile } from "@/lib/svga";
 import { formatBytes } from "@/lib/compress";
 import { renderFrameCanvas } from "@/lib/renderer";
+import { filesFromDrop } from "@/lib/files";
 
 export type LoadedFile = { file: File; movie: MovieFile };
 
@@ -16,9 +17,11 @@ type Props = {
   onAdd: (files: File[]) => void;
   onClear: () => void;
   disabled?: boolean;
+  /** Make icons of every loaded file in the batch tool. */
+  onMakeIcons?: () => void;
 };
 
-export default function FilesPanel({ files, active, siblingNames, onPick, onAdd, onClear, disabled }: Props) {
+export default function FilesPanel({ files, active, siblingNames, onPick, onAdd, onClear, disabled, onMakeIcons }: Props) {
   const [over, setOver] = useState(false);
   return (
     <aside className="glass rounded-2xl flex flex-col min-h-0" aria-label="Files">
@@ -63,11 +66,18 @@ export default function FilesPanel({ files, active, siblingNames, onPick, onAdd,
         })}
       </ul>
 
+      {onMakeIcons && files.length >= 2 && (
+        <button type="button" onClick={onMakeIcons} disabled={disabled}
+          className="mx-2 mt-2 flex items-center justify-center gap-2 rounded-xl bg-white/[0.06] hover:bg-white/10 px-3 py-2 text-xs font-medium text-white/85 transition disabled:opacity-40">
+          <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 fill-current"><path d="M4 4h7v7H4V4zm9 0h7v7h-7V4zM4 13h7v7H4v-7zm9 0h7v7h-7v-7z" /></svg>
+          Make icons for all {files.length}
+        </button>
+      )}
       <label
         className={`m-2 block rounded-xl border-2 border-dashed px-3 py-3 text-center cursor-pointer transition ${over ? "border-brand-400 bg-brand-500/10" : "border-white/10 hover:border-white/25"} ${disabled ? "opacity-60 pointer-events-none" : ""}`}
         onDragOver={(e) => { e.preventDefault(); setOver(true); }}
         onDragLeave={() => setOver(false)}
-        onDrop={(e) => { e.preventDefault(); setOver(false); onAdd(Array.from(e.dataTransfer.files)); }}
+        onDrop={(e) => { e.preventDefault(); setOver(false); void filesFromDrop(e.dataTransfer).then((p) => onAdd(p.map((x) => x.file))); }}
       >
         <input type="file" accept=".svga" multiple className="sr-only" disabled={disabled} onChange={(e) => { onAdd(Array.from(e.target.files ?? [])); e.target.value = ""; }} />
         <div className="text-xs font-medium text-white">+ Add files</div>

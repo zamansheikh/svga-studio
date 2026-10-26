@@ -39,6 +39,8 @@ type Props = {
   fileName: string;
   building: boolean;
   toolbar?: ReactNode;
+  /** Another tool is on screen: stop playing. */
+  suspended?: boolean;
 };
 
 const VIEWS: { id: StageView; label: string; hint: string }[] = [
@@ -47,7 +49,7 @@ const VIEWS: { id: StageView; label: string; hint: string }[] = [
   { id: "result", label: "Result", hint: "what you will download" },
 ];
 
-export default function Stage({ movies, view, onView, mode, watermark, onWatermarkChange, overlay, highlight, seek, onFrame, fileName, building, toolbar }: Props) {
+export default function Stage({ movies, view, onView, mode, watermark, onWatermarkChange, overlay, highlight, seek, onFrame, fileName, building, toolbar, suspended }: Props) {
   const showEdited = view === "edited" && movies.edited;
   const movie = view === "result" ? movies.result : showEdited ? movies.edited!.movie : movies.original;
   const override = showEdited ? movies.edited!.override : undefined;
@@ -100,6 +102,10 @@ export default function Stage({ movies, view, onView, mode, watermark, onWaterma
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [movie]);
 
+  useEffect(() => {
+    if (suspended && rendererRef.current?.isPlaying()) { rendererRef.current.pause(); setPlaying(false); }
+  }, [suspended]);
+
   // New edits: redraw in place.
   useEffect(() => { rendererRef.current?.setOptions({ override }); }, [override]);
   useEffect(() => { rendererRef.current?.setMuted(muted); }, [muted]);
@@ -150,6 +156,7 @@ export default function Stage({ movies, view, onView, mode, watermark, onWaterma
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (suspended) return;
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
       if (e.key === "1") onView("original");
@@ -162,7 +169,7 @@ export default function Stage({ movies, view, onView, mode, watermark, onWaterma
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [movies.edited, movies.result, onView]);
+  }, [movies.edited, movies.result, onView, suspended]);
 
   const hasAudio = !!movie?.audioBytes.length;
 

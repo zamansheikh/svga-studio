@@ -31,7 +31,16 @@ type Progress = { done: number; total: number; label: string };
  * from boxes drawn on the stage; every edit shows live in the Edited view
  * and is baked into the file on Build.
  */
-export default function Workspace() {
+type WorkspaceProps = {
+  /** Files handed over from the batch tool, to open here. */
+  incoming?: { files: File[]; nonce: number } | null;
+  /** Hand the loaded files to the batch icon tool. */
+  onMakeIcons?: (files: File[]) => void;
+  /** False while another tool is shown: the player stops. */
+  active?: boolean;
+};
+
+export default function Workspace({ incoming = null, onMakeIcons, active = true }: WorkspaceProps = {}) {
   const [files, setFiles] = useState<LoadedFile[]>([]);
   const [activeFile, setActiveFile] = useState<File | null>(null);
   const [original, setOriginal] = useState<MovieFile | null>(null);
@@ -82,7 +91,7 @@ export default function Workspace() {
     jumped.current = false;
   }, []);
 
-  const load = useCallback(async (incoming: File[], append: boolean) => {
+  const load = useCallback(async (incoming: File[], append: boolean, focus?: string): Promise<void> => {
     setError(null);
     const loaded: LoadedFile[] = [];
     let firstError: string | null = null;
@@ -99,12 +108,20 @@ export default function Workspace() {
     const all = append ? [...files, ...loaded] : loaded;
     if (!all.length) { if (!firstError) setError("No readable .svga files."); return; }
     setFiles(all);
-    if (!append || !activeFile) pick(all[0], all);
+    const target = focus ? all.find((x) => x.file.name === focus) : null;
+    if (target && target.file !== activeFile) pick(target, all);
+    else if (!append || !activeFile) pick(all[0], all);
     else {
       const cur = all.find((x) => x.file === activeFile);
       if (cur) setSiblings(all.filter((x) => x !== cur && isSibling(cur.movie, x.movie)).map((x) => ({ name: x.file.name, movie: x.movie })));
     }
   }, [files, activeFile, pick]);
+
+  useEffect(() => {
+    // Added beside whatever is open (and opened), like picking it in the Files list.
+    if (incoming?.files.length) void load(incoming.files, true, incoming.files[0].name);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [incoming]);
 
   const clear = useCallback(() => {
     setFiles([]); setActiveFile(null); setOriginal(null); setSiblings([]);
@@ -417,7 +434,8 @@ export default function Workspace() {
       )}
 
       <div className="grid gap-3 lg:grid-cols-[220px_minmax(0,1fr)_380px] items-start">
-        <FilesPanel files={files} active={activeFile} siblingNames={siblingNames} onPick={(f) => pick(f, files)} onAdd={(f) => load(f, true)} onClear={clear} disabled={building} />
+        <FilesPanel files={files} active={activeFile} siblingNames={siblingNames} onPick={(f) => pick(f, files)} onAdd={(f) => load(f, true)} onClear={clear} disabled={building}
+          onMakeIcons={onMakeIcons ? () => onMakeIcons(files.map((f) => f.file)) : undefined} />
 
         <Stage
           movies={{ original, edited: anyEdit ? { movie: base, override: override ?? new Map() } : null, result: result?.movie ?? null }}
@@ -429,6 +447,7 @@ export default function Workspace() {
           overlay={{ boxes: boxesWithBounds, selectedId, onSelect: select, onRegionChange, selectMode, onSelectRect }}
           highlight={tab === "layers" ? highlight : null}
           seek={seek}
+          suspended={!active}
           onFrame={(f) => { frameRef.current = f; }}
           fileName={activeFile.name}
           building={building}

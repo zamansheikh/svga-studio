@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
+import { filesFromDrop } from "@/lib/files";
 
 type Props = {
   /** The first file is the one to work on; the rest are siblings. */
@@ -41,7 +42,11 @@ export default function Dropzone({ onFiles, disabled }: Props) {
       onDrop={(e) => {
         e.preventDefault();
         setIsOver(false);
-        handleFiles(e.dataTransfer.files);
+        // Folders too: their .svga files, searched inside.
+        void filesFromDrop(e.dataTransfer).then((picked) => {
+          if (!picked.length) { alert("Please choose .svga files. SVG files are not supported by this tool."); return; }
+          onFiles(picked.map((p) => p.file));
+        });
       }}
     >
       <input

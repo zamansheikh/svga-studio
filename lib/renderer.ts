@@ -70,6 +70,20 @@ export function resolveImageKey(movie: MovieFile, key: string): string | null {
   return null;
 }
 
+/**
+ * Free a movie's decoded bitmaps now rather than at garbage collection —
+ * a batch decodes hundreds of files one after another.
+ */
+export function releaseMovie(movie: MovieFile) {
+  for (const bytes of Object.values(movie.images)) {
+    const p = bitmapCache.get(bytes);
+    if (!p) continue;
+    bitmapCache.delete(bytes);
+    void p.then((b) => b?.close());
+  }
+  spriteCache.delete(movie);
+}
+
 export type BitmapMap = Map<string, ImageBitmap>;
 
 /** Every image a movie's sprites draw, by sprite imageKey. */
@@ -303,22 +317,34 @@ export async function createRendererFromMovie(
   const frameInterval = 1000 / Math.max(1, fps || 20);
 
   // Sound: each audio entity plays from its start frame to its end frame.
-  const audios = audiosOf(movie).map((a) => {
+  // The audio elements are only made once sound is wanted (it starts muted).
+  type Track = { a: Audio; bytes: Uint8Array; el: HTMLAudioElement | null; url: string | null };
+  const tracks: Track[] = [];
+  for (const a of audiosOf(movie)) {
     const bytes = movie.images[a.audioKey];
-    if (!bytes) return null;
-    const el = new Audio(URL.createObjectURL(new Blob([bytes as BlobPart], { type: "audio/mpeg" })));
-    el.preload = "auto";
-    return { a, el };
-  }).filter((x): x is { a: Audio; el: HTMLAudioElement } => !!x);
+    if (bytes) tracks.push({ a, bytes, el: null, url: null });
+  }
+  const elementOf = (t: Track) => {
+    if (!t.el) {
+      t.url = URL.createObjectURL(new Blob([t.bytes as BlobPart], { type: "audio/mpeg" }));
+      t.el = new Audio(t.url);
+      t.el.preload = "auto";
+    }
+    return t.el;
+  };
   let muted = init.muted ?? true;
   const syncAudio = (f: number, jumped: boolean) => {
-    for (const { a, el } of audios) {
+    for (const t of tracks) {
+      const { a } = t;
       const end = a.endFrame > a.startFrame ? a.endFrame : totalFrames;
       const inside = playing && !muted && f >= a.startFrame && f < end;
-      if (inside && (el.paused || jumped)) {
-        el.currentTime = Math.max(0, (a.startTime + ((f - a.startFrame) * 1000) / Math.max(1, fps || 20)) / 1000);
-        void el.play().catch(() => {});
-      } else if (!inside && !el.paused) el.pause();
+      if (inside) {
+        const el = elementOf(t);
+        if (el.paused || jumped) {
+          el.currentTime = Math.max(0, (a.startTime + ((f - a.startFrame) * 1000) / Math.max(1, fps || 20)) / 1000);
+          void el.play().catch(() => {});
+        }
+      } else if (t.el && !t.el.paused) t.el.pause();
     }
   };
 
@@ -396,7 +422,15 @@ export async function createRendererFromMovie(
     },
     destroy() {
       api.pause();
-      for (const { el } of audios) { el.pause(); URL.revokeObjectURL(el.src); }
+      for (const t of tracks) {
+        if (!t.el) continue;
+        // Stop any load in flight before the URL goes away.
+        t.el.pause();
+        t.el.removeAttribute("src");
+        t.el.load();
+        if (t.url) URL.revokeObjectURL(t.url);
+        t.el = null;
+      }
     },
   };
 

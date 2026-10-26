@@ -9,6 +9,8 @@ import * as items from "@/lib/text/items";
 import * as style from "@/lib/text/style";
 import * as fontmatch from "@/lib/text/fontmatch";
 import * as fonts from "@/lib/text/fonts";
+import * as files from "@/lib/files";
+import * as icons from "@/lib/icons";
 
 /** Renders frame `frame` of a movie into a canvas `scale` times the viewBox. */
 async function renderFrame(movie: svga.MovieFile, frame: number, maxSide = 256): Promise<HTMLCanvasElement> {
@@ -21,7 +23,7 @@ const b64 = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 export default function Lab() {
   const [ready, setReady] = useState(false);
   useEffect(() => {
-    Object.assign(window, { __lab: { svga, renderer, detect, raster, items, style, fontmatch, fonts, renderFrame, b64 } });
+    Object.assign(window, { __lab: { svga, renderer, detect, raster, items, style, fontmatch, fonts, files, icons, renderFrame, b64 } });
     setReady(true);
   }, []);
   return <div id="lab" data-ready={ready ? "1" : "0"} style={{ padding: 16, color: "#fff" }}>lab {ready ? "ready" : "loading"}</div>;
