@@ -4,7 +4,7 @@ Modern, 100% client-side studio for **SVGA 2.x** animation files (`.svga`): prev
 compress, watermark, and replace the text baked into a badge — in the original lettering.
 
 Formerly *SVGA Compressor*; the old repository URL redirects here.
-Built with Next.js 15, React 19, TypeScript, Tailwind. Deploys to Vercel in one click.
+Built with Next.js 16, React 19, TypeScript, Tailwind. Deploys to Vercel in one click.
 
 > Note: this is for **SVGA** (bitmap-based animation format used by live-streaming gift effects,
 > stickers, etc.) — not for static SVG. For SVG, use SVGO.
@@ -26,7 +26,7 @@ Built with Next.js 15, React 19, TypeScript, Tailwind. Deploys to Vercel in one 
 
 ## Tech
 
-- `next@15` (App Router) · `react@19`
+- `next@16` (App Router) · `react@19`
 - `protobufjs` — parses the SVGA 2.x protobuf schema at runtime (no codegen step)
 - `pako` — gzip inflate/deflate in the browser
 - Canvas / OffscreenCanvas — image re-encoding and preview rendering
