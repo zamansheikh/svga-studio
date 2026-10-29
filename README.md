@@ -47,6 +47,23 @@ npm run dev
 `/lab` (development only, 404 in production) exposes the engine on `window.__lab`
 for scripted checks.
 
+## Studio lock (PIN)
+
+The tool pages (`/edit`, `/icons`) ask for a 4-digit PIN; the landing page
+stays public. The PIN is checked on the server and never reaches the browser:
+
+| Variable | |
+| --- | --- |
+| `STUDIO_PIN` | the 4-digit PIN. Without it the tools stay locked for everyone. |
+| `STUDIO_SECRET` | optional, any long random string; signs the unlock cookie. |
+
+Locally put them in `.env.local` (git-ignored); on Vercel add them under
+*Settings → Environment Variables* and redeploy. Entering the PIN sets a
+signed, httpOnly cookie for 30 days; **Lock** in the top bar ends it.
+Changing the PIN or the secret signs every device out. Wrong PINs are slowed
+down (5 tries, then a 1-minute wait that doubles), counted per server
+instance — a 4-digit PIN keeps casual visitors out, it isn't a password vault.
+
 ## Build
 
 ```bash

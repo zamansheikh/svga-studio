@@ -29,13 +29,22 @@ export default function Studio() {
 
   // Files dropped on the landing page.
   useEffect(() => {
-    const p = takeHandoff();
-    if (!p) return;
-    if (p.mode === "icons") setToIcons({ files: p.files, nonce: Date.now() });
-    else setToEdit({ files: p.files.map((f) => f.file), nonce: Date.now() });
+    let cancelled = false;
+    void takeHandoff().then((p) => {
+      if (!p || cancelled) return;
+      if (p.mode === "icons") setToIcons({ files: p.files, nonce: Date.now() });
+      else setToEdit({ files: p.files.map((f) => f.file), nonce: Date.now() });
+    });
+    return () => { cancelled = true; };
   }, []);
 
   const go = useCallback((m: Mode) => router.push(m === "icons" ? "/icons" : "/edit"), [router]);
+
+  // Lock: forget the unlock cookie and reload, so nothing loaded stays in memory.
+  const lock = useCallback(async () => {
+    await fetch("/api/lock", { method: "POST" }).catch(() => {});
+    window.location.assign(`/unlock?next=${encodeURIComponent(location.pathname)}`);
+  }, []);
 
   return (
     <div className="flex min-h-dvh flex-col bg-[#080a13] text-white lg:h-dvh lg:overflow-hidden">
@@ -65,6 +74,11 @@ export default function Studio() {
           </span>
           <Shortcuts mode={mode} />
           <Link href="/#faq" className="rounded-lg px-2.5 py-1.5 text-[13px] text-white/60 hover:bg-white/5 hover:text-white">Help</Link>
+          <button type="button" onClick={lock} title="Lock the studio on this device (the PIN is asked again)"
+            className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[13px] text-white/60 hover:bg-white/5 hover:text-white">
+            <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 fill-current" aria-hidden><path d="M12 2a5 5 0 0 0-5 5v3H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2h-1V7a5 5 0 0 0-5-5zm-3 8V7a3 3 0 1 1 6 0v3H9z" /></svg>
+            <span className="hidden sm:inline">Lock</span>
+          </button>
         </div>
       </header>
 

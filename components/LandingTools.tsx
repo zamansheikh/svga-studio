@@ -39,15 +39,15 @@ export default function LandingTools() {
   // Old links to the batch tool (/#icons) now go to its page.
   useEffect(() => { if (location.hash === "#icons") router.replace("/icons"); }, [router]);
 
-  const open = (mode: "edit" | "icons", href: string, files: PickedFile[]) => {
+  const open = async (mode: "edit" | "icons", href: string, files: PickedFile[]) => {
     if (!files.length) return;
-    handOff(mode, files);
+    await handOff(mode, files);
     router.push(href);
   };
 
   return (
     <div className="grid gap-4 md:grid-cols-2">
-      {TOOLS.map((t) => <ToolCard key={t.mode} tool={t} onFiles={(f) => open(t.mode, t.href, f)} />)}
+      {TOOLS.map((t) => <ToolCard key={t.mode} tool={t} onFiles={(f) => void open(t.mode, t.href, f)} />)}
     </div>
   );
 }
